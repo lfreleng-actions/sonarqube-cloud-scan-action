@@ -81,14 +81,14 @@ runs:
     - name: 'Check for SonarQube project configuration'
       id: sonar-project-properties
       # yamllint disable-line rule:line-length
-      uses: lfit/releng-reusable-workflows/.github/actions/path-check-action@2e3a6189595647fd51134412de8d7d9a56f2081c # v0.2.16
+      uses: lfreleng-actions/path-check-action@aa7dabfa92e50e31a0f091dd3e2741692e8dde07 # v0.1.5
       with:
         path: 'sonar-project.properties'
 
     - name: 'Check for SonarQube project configuration'
       id: sonarcloud-properties
       # yamllint disable-line rule:line-length
-      uses: lfit/releng-reusable-workflows/.github/actions/path-check-action@2e3a6189595647fd51134412de8d7d9a56f2081c # v0.2.16
+      uses: lfreleng-actions/path-check-action@aa7dabfa92e50e31a0f091dd3e2741692e8dde07 # v0.1.5
       with:
         path: '.sonarcloud.properties'
 
