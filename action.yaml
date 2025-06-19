@@ -144,7 +144,7 @@ runs:
     - name: 'Install build wrapper'
       if: inputs.BUILD_WRAPPER_URL != ''
       # yamllint disable-line rule:line-length
-      uses: SonarSource/sonarqube-scan-action/install-build-wrapper@bfd4e558cda28cda6b5defafb9232d191be8c203 # v4.2.1
+      uses: SonarSource/sonarqube-scan-action/install-build-wrapper@2500896589ef8f7247069a56136f8dc177c27ccf # v5.2.0
 
     - name: 'Run build wrapper'
       if: inputs.BUILD_WRAPPER_URL != ''
@@ -174,7 +174,7 @@ runs:
 
     - name: 'SonarQube Scan'
       # yamllint disable-line rule:line-length
-      uses: SonarSource/sonarqube-scan-action@bfd4e558cda28cda6b5defafb9232d191be8c203 # v4.2.1
+      uses: SonarSource/sonarqube-scan-action@2500896589ef8f7247069a56136f8dc177c27ccf # v5.2.0
       env:
         SONAR_TOKEN: ${{ inputs.sonar_token }}
         SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
