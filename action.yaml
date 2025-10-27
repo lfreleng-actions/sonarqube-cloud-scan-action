@@ -76,7 +76,7 @@ runs:
     - name: 'Repository metadata'
       id: repository-metadata
       # yamllint disable-line rule:line-length
-      uses: lfit/releng-reusable-workflows/.github/actions/repository-metadata-action@353a06e737c950cb297b3138784729ebd24e4861 # v0.2.22
+      uses: lfit/releng-reusable-workflows/.github/actions/repository-metadata-action@b138097fe80abdc0f3d220787cbd82dbe231179c # v0.2.24
 
     - name: 'Check for SonarQube project configuration'
       id: sonar-project-properties
