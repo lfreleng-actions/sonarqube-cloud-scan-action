@@ -60,6 +60,12 @@ inputs:
     required: false
     default: 'false'
     # type: boolean
+  github_token:
+    # yamllint disable-line rule:line-length
+    description: 'GitHub token for API access (optional, improves metadata accuracy)'
+    required: false
+    default: ''
+    # type: string
 
 runs:
   using: 'composite'
@@ -76,7 +82,9 @@ runs:
     - name: 'Repository metadata'
       id: repository-metadata
       # yamllint disable-line rule:line-length
-      uses: lfit/releng-reusable-workflows/.github/actions/repository-metadata-action@b138097fe80abdc0f3d220787cbd82dbe231179c # v0.2.24
+      uses: lfreleng-actions/repository-metadata-action@8462ed1e666c78ae4b48667aa2fbc6101ed0a542 # v0.1.1
+      with:
+        github_token: ${{ inputs.github_token }}
 
     - name: 'Check for SonarQube project configuration'
       id: sonar-project-properties
