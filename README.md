@@ -80,6 +80,105 @@ portal. For further details on populating the scan configuration file with
 the required information, refer to the documentation links in the section
 below.
 
+### Important: SCM Exclusions and Compiled Binaries
+
+**Note:** The action automatically sets `sonar.scm.exclusions.disabled=true` in
+ephemeral configuration files.
+
+By default, SonarQube respects `.gitignore` patterns when scanning repositories.
+This can cause issues for projects that build compiled artifacts (like Java `.class`
+files) into directories that are intentionally excluded from version control
+(e.g., `target/` for Maven projects).
+
+**The Problem:**
+
+- Maven/Gradle compile `.java` source files into `.class` files in `target/classes/`
+- The `target/` directory is typically listed in `.gitignore`
+- SonarQube sees that `target/` is in `.gitignore` and skips those
+  directories entirely
+- This results in the error: "Your project contains .java files, please provide
+  compiled classes with sonar.java.binaries property, or enable the Java
+  bytecode scanner"
+
+**The Solution:**
+Set `sonar.scm.exclusions.disabled=true` to tell SonarQube to ignore
+`.gitignore` patterns, allowing it to access compiled binaries needed for
+comprehensive analysis.
+
+**For Java/Maven Projects:**
+If you create your own `sonar-project.properties` file, include:
+
+```ini
+# Disable SCM exclusions so .gitignore doesn't hide target directories
+sonar.scm.exclusions.disabled=true
+
+# Binary directories (compiled .class files)
+sonar.java.binaries=target/classes
+# Or for multi-module projects:
+# sonar.java.binaries=module1/target/classes,module2/target/classes
+```
+
+Without this setting, you'll need to either:
+
+1. Remove `target/` from `.gitignore` (not recommended)
+2. Manually copy compiled classes to a non-ignored directory (inefficient)
+3. Set `sonar.scm.exclusions.disabled=true` (recommended)
+
+### Example: Java Maven Multi-Module Project
+
+For a typical Maven multi-module Java project with this structure:
+
+```text
+my-project/
+├── pom.xml
+├── module1/
+│   └── src/
+│       ├── main/java/
+│       └── test/java/
+├── module2/
+│   └── src/
+│       ├── main/java/
+│       └── test/java/
+└── sonar-project.properties
+```
+
+Create a `sonar-project.properties` file like this:
+
+```ini
+# Organization and project identification
+sonar.organization=my-org
+sonar.projectKey=my-project
+
+# Disable SCM exclusions so .gitignore doesn't hide target directories
+sonar.scm.exclusions.disabled=true
+
+# Source directories
+sonar.sources=module1/src/main/java,module2/src/main/java
+
+# Test directories
+sonar.tests=module1/src/test/java,module2/src/test/java
+
+# Binary directories (compiled .class files)
+sonar.java.binaries=module1/target/classes,module2/target/classes
+
+# Test binary directories
+sonar.java.test.binaries=module1/target/test-classes,module2/target/test-classes
+
+# Java version
+sonar.java.source=17
+sonar.java.target=17
+
+# Encoding
+sonar.sourceEncoding=UTF-8
+
+# JaCoCo coverage report paths (if using JaCoCo)
+sonar.coverage.jacoco.xmlReportPaths=**/target/site/jacoco/jacoco.xml
+```
+
+**Important:** Run your Maven build (e.g., `mvn clean install`) **before**
+running the SonarQube scan so that the compiled `.class` files exist in the
+`target/` directories.
+
 ## SonarQube Cloud Documentation
 
 Refer to the links below:
@@ -95,14 +194,78 @@ For information on the build wrapper for C language based projects:
 
 <!-- markdownlint-disable MD013 -->
 
-| Variable Name         | Required | Default               | Description                                            |
-| --------------------- | -------- | --------------------- | ------------------------------------------------------ |
-| sonar_token           | True     | N/A                   | Mandatory authentication token to upload results       |
-| sonar_root_cert       | False    | N/A                   | PEM encoded server root certificate (for HTTPS upload) |
-| build_wrapper_url     | False    | N/A                   | Download location of build wrapper/shell script        |
-| build_wrapper_out_dir | False    | N/A                   | Local filesystem location of build artefacts           |
-| sonar_host_url        | False    | <https://sonarcloud.io> | Uploads scans to the given host URL                  |
-| lc_all                | False    | en_US.UTF-8           | Locale for code base (if not covered by en_US.UTF-8)   |
-| debug                 | False    | false                 | Enable debugging output                                |
+| Variable Name         | Required | Default                             | Description                                            |
+| --------------------- | -------- | ----------------------------------- | ------------------------------------------------------ |
+| sonar_token           | True     | N/A                                 | Mandatory authentication token to upload results       |
+| sonar_root_cert       | False    | N/A                                 | PEM encoded server root certificate (for HTTPS upload) |
+| build_wrapper_url     | False    | N/A                                 | Download location of build wrapper/shell script        |
+| build_wrapper_out_dir | False    | N/A                                 | Local filesystem location of build artefacts           |
+| sonar_host_url        | False    | <https://sonarcloud.io>             | Uploads scans to the given host URL                    |
+| lc_all                | False    | en_US.UTF-8                         | Locale for code base (if not covered by en_US.UTF-8)   |
+| debug                 | False    | false                               | Enable debugging output                                |
+| project_base_dir      | False    | .                                   | Set the sonar.projectBaseDir analysis property         |
+| scanner_version       | False    | (uses SonarSource action's default) | Version of the Sonar Scanner CLI to use                |
+| args                  | False    | -Dsonar.scanner.cache.enabled=false | Arguments to pass to the Sonar Scanner CLI             |
+
+<!-- markdownlint-enable MD013 -->
+
+## Troubleshooting
+
+### Error: "Your project contains .java files, please provide compiled classes"
+
+**Symptoms:**
+
+```text
+WARN  Binary paths (sonar.java.binaries) are empty
+ERROR Your project contains .java files, please provide compiled
+      classes with sonar.java.binaries property
+```
+
+**Cause:** SonarQube cannot find the compiled `.class` files, which can
+happen when:
+
+1. The build has not completed yet (no `.class` files exist)
+2. The `target/` directory is in `.gitignore` and
+   `sonar.scm.exclusions.disabled=true` is not set
+3. The `sonar.java.binaries` path is incorrect
+
+**Solution:**
+
+1. Ensure you run your build **before** the SonarQube scan (e.g.,
+   `mvn clean install`)
+2. Add `sonar.scm.exclusions.disabled=true` to your `sonar-project.properties`
+3. Verify your `sonar.java.binaries` paths match where Maven/Gradle outputs
+   `.class` files
+
+### Large Number of Files Ignored
+
+**Symptoms:**
+
+```text
+INFO  1806 files ignored because of scm ignore settings
+```
+
+**Cause:** SonarQube is respecting `.gitignore` patterns and excluding files,
+potentially including compiled binaries needed for analysis.
+
+**Solution:** Add `sonar.scm.exclusions.disabled=true` to your configuration file.
+
+### Missing JaCoCo Coverage Reports
+
+**Symptoms:**
+
+```text
+WARNING: Report file target/site/jacoco/jacoco.csv does not exist
+```
+
+**Cause:** Maven build did not generate JaCoCo reports, or they are in a
+different location.
+
+**Solution:**
+
+1. Ensure your Maven `pom.xml` includes the JaCoCo plugin
+2. Run tests before scanning: use `mvn clean verify` instead of `mvn compile`
+3. For multi-module projects, use wildcards:
+   `sonar.coverage.jacoco.xmlReportPaths=**/target/site/jacoco/jacoco.xml`
 
 <!-- markdownlint-enable MD013 -->
