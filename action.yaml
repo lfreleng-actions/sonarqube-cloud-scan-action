@@ -66,6 +66,22 @@ inputs:
     required: false
     default: ''
     # type: string
+  project_base_dir:
+    description: 'Set the sonar.projectBaseDir analysis property'
+    required: false
+    default: '.'
+    # type: string
+  scanner_version:
+    description: 'Version of the Sonar Scanner CLI to use'
+    required: false
+    default: ''
+    # type: string
+  args:
+    # yamllint disable-line rule:line-length
+    description: 'Arguments to pass to the Sonar Scanner CLI (e.g., "-Dsonar.verbose=true")'
+    required: false
+    default: '-Dsonar.scanner.cache.enabled=false'
+    # type: string
 
 runs:
   using: 'composite'
@@ -117,8 +133,11 @@ runs:
         echo 'https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/analysis-parameters/' \
           >> "$GITHUB_STEP_SUMMARY"
         # Create an ephemeral configuration file
-        echo "sonar.organization=${{ steps.repository-metadata.outputs.repository_owner }}" > sonar-project.properties
-        echo "sonar.projectKey=${{ steps.repository-metadata.outputs.repository_name }}" >> sonar-project.properties
+        cat > sonar-project.properties <<EOF
+        sonar.organization=${{ steps.repository-metadata.outputs.repository_owner }}
+        sonar.projectKey=${{ steps.repository-metadata.outputs.repository_name }}
+        sonar.scm.exclusions.disabled=true
+        EOF
         echo 'Created: sonar-project.properties'
         echo 'Containing:'
         cat sonar-project.properties
@@ -181,6 +200,7 @@ runs:
         ls -la
 
     - name: 'SonarQube Scan'
+      id: sonar-scan
       # yamllint disable-line rule:line-length
       uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
       env:
@@ -188,12 +208,41 @@ runs:
         SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
         SONAR_ROOT_CERT: ${{ inputs.sonar_root_cert }}
         SONAR_VERBOSE: ${{ inputs.debug }}
-        LC_ALL: ${{ inputs.LC_ALL }}
+        LC_ALL: ${{ inputs.lc_all }}
+        SONAR_SCANNER_OPTS: "-Dsonar.scanner.skipJreProvisioning=true"
+      with:
+        projectBaseDir: ${{ inputs.project_base_dir }}
+        scannerVersion: ${{ inputs.scanner_version }}
+        args: ${{ inputs.args }}
 
     - name: 'Print summary/job output'
       shell: bash
       # yamllint disable rule:line-length
       run: |
         # Print summary/job output
+        # Extract the dashboard URL from .scannerwork/report-task.txt if available
+        DASHBOARD_URL=""
+        if [ -f ".scannerwork/report-task.txt" ]; then
+          DASHBOARD_URL=$(grep -E "^dashboardUrl=" .scannerwork/report-task.txt | cut -d'=' -f2-)
+        fi
+
+        # Fallback to constructing URL if not found in report-task.txt
+        if [ -z "$DASHBOARD_URL" ]; then
+          # Read project key from sonar-project.properties or .sonarcloud.properties
+          PROJECT_KEY=""
+          if [ -f "sonar-project.properties" ]; then
+            PROJECT_KEY=$(grep -E "^sonar.projectKey=" sonar-project.properties | cut -d'=' -f2- | tr -d ' ')
+          elif [ -f ".sonarcloud.properties" ]; then
+            PROJECT_KEY=$(grep -E "^sonar.projectKey=" .sonarcloud.properties | cut -d'=' -f2- | tr -d ' ')
+          fi
+
+          if [ -n "$PROJECT_KEY" ]; then
+            DASHBOARD_URL="https://sonarcloud.io/dashboard?id=${PROJECT_KEY}"
+          else
+            # Last resort: use repository metadata
+            DASHBOARD_URL="https://sonarcloud.io/project/overview?id=${{ steps.repository-metadata.outputs.repository_owner }}_${{ steps.repository-metadata.outputs.repository_name }}"
+          fi
+        fi
+
         echo '## 🔐 SonarQube Cloud Scan Results Updated' >> "$GITHUB_STEP_SUMMARY"
-        echo "🔗 https://sonarcloud.io/project/overview?id=${{ steps.repository-metadata.outputs.repository_owner }}_${{ steps.repository-metadata.outputs.repository_name }}" >> "$GITHUB_STEP_SUMMARY"
+        echo "🔗 ${DASHBOARD_URL}" >> "$GITHUB_STEP_SUMMARY"
