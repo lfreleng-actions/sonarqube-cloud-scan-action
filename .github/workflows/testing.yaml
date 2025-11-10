@@ -20,29 +20,224 @@ concurrency:
 permissions: {}
 
 jobs:
-  ### Test the GitHub Action in this Repository ###
-  tests:
-    name: 'Test local GitHub Action'
+  ### Test the GitHub Action with test-python-project ###
+  test-python-project:
+    name: 'Test with Python Project'
     runs-on: 'ubuntu-latest'
     permissions:
       contents: read
-    timeout-minutes: 10 # Increase this timeout value as needed
+      security-events: write
+      id-token: write
+    timeout-minutes: 15
     steps:
-      - name: 'Checkout repository'
+      - name: 'Checkout action'
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      - name: 'Test vars/secrets are available'
+      - name: 'Checkout test-python-project'
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: 'lfreleng-actions/test-python-project'
+          path: 'test-python-project'
+          fetch-depth: 0
+
+      - name: 'Setup Python'
+        # yamllint disable-line rule:line-length
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: '3.11'
+
+      - name: 'Install Python dependencies'
+        working-directory: 'test-python-project'
+        run: |
+          # Install dependencies
+          python -m pip install --upgrade pip
+          pip install pdm pytest pytest-cov
+
+      - name: 'Install project dependencies'
+        working-directory: 'test-python-project'
+        run: |
+          # Install project dependencies using pdm
+          pdm install --dev
+
+      - name: 'Run tests and generate coverage'
+        working-directory: 'test-python-project'
+        run: |
+          # Run tests with coverage in XML format for SonarQube
+          pdm run pytest --cov --cov-report=xml:coverage.xml tests
+          echo "✅ Tests completed and coverage.xml generated"
+          if [ -f "coverage.xml" ]; then
+            echo "Coverage report size: $(wc -c < coverage.xml) bytes"
+          else
+            echo "⚠️ Warning: coverage.xml not found"
+          fi
+
+      - name: 'Verify test project setup'
+        working-directory: 'test-python-project'
+        run: |
+          # Verify sonar-project.properties exists
+          echo "Checking for sonar-project.properties..."
+          if [ -f "sonar-project.properties" ]; then
+            echo "✅ sonar-project.properties found"
+            echo "Contents:"
+            cat sonar-project.properties
+          else
+            echo "❌ sonar-project.properties not found"
+            exit 1
+          fi
+          echo ""
+          echo "Directory structure:"
+          ls -la
+          echo ""
+          echo "Source directory:"
+          ls -la src/ || echo "src/ not found"
+          echo ""
+          if [ -f "coverage.xml" ]; then
+            echo "✅ Coverage XML exists"
+          else
+            echo "❌ Coverage XML missing"
+            exit 1
+          fi
+
+      - name: 'Test secrets are available'
         run: |
           # Test secrets are available
           if [ -n "${{ secrets.SONAR_TOKEN }}" ]; then
-            echo 'SONAR_TOKEN is set'
+            echo 'SONAR_TOKEN is set ✅'
           else
-            echo 'SONAR_TOKEN is not available ❌'; exit 1
+            echo 'SONAR_TOKEN is not available ❌'
+            echo 'Scan will create ephemeral config and attempt to run'
           fi
 
-      - name: "Running local action: ${{ github.repository }}"
+      - name: 'Run SonarQube Cloud Scan on test project'
+        uses: ./
+        with:
+          sonar_token: '${{ secrets.SONAR_TOKEN }}'
+          no_checkout: 'true'
+          debug: 'true'
+          project_base_dir: 'test-python-project'
+
+  ### Test the GitHub Action with Java/Maven project ###
+  test-java-maven:
+    name: 'Test with Java Maven Project'
+    runs-on: 'ubuntu-latest'
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+    timeout-minutes: 20
+    steps:
+      - name: 'Checkout action'
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: 'Checkout rappmanager repository'
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: 'o-ran-sc/nonrtric-plt-rappmanager'
+          path: 'rappmanager'
+          fetch-depth: 0
+
+      - name: 'Check for file: pom.xml'
+        id: maven-project
+        # yamllint disable-line rule:line-length
+        uses: lfreleng-actions/path-check-action@aa7dabfa92e50e31a0f091dd3e2741692e8dde07 # v0.1.5
+        with:
+          path: 'rappmanager/pom.xml'
+
+      - name: 'Setup Java'
+        if: steps.maven-project.outputs.type == 'file'
+        # yamllint disable-line rule:line-length
+        uses: actions/setup-java@8df1039502a15bceb9433410b1a100fbe190c53b # v4.5.0
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: 'Setup Maven'
+        if: steps.maven-project.outputs.type == 'file'
+        # yamllint disable-line rule:line-length
+        uses: stCarolas/setup-maven@d6af6abeda15e98926a57b5aa970a96bb37f97d1 # v5
+        with:
+          maven-version: '3.9.9'
+
+      - name: 'Build Maven project'
+        if: steps.maven-project.outputs.type == 'file'
+        working-directory: 'rappmanager'
+        run: |
+          # Build Maven project
+          mvn clean verify -Ddocker.skip=true
+
+      - name: 'Verify Maven build outputs'
+        if: steps.maven-project.outputs.type == 'file'
+        working-directory: 'rappmanager'
+        run: |
+          # Verify compiled classes exist
+          echo "Checking for compiled .class files..."
+          find . -name "*.class" -type f | head -20
+          echo ""
+          echo "Checking for sonar-project.properties..."
+          if [ -f "sonar-project.properties" ]; then
+            echo "✅ sonar-project.properties found"
+            echo "Contents:"
+            cat sonar-project.properties
+          else
+            echo "❌ sonar-project.properties not found"
+            exit 1
+          fi
+          echo ""
+          echo "Checking target directories..."
+          find . -type d -name "target" | head -10
+
+      - name: 'Test secrets are available'
+        run: |
+          # Test secrets are available
+          if [ -n "${{ secrets.SONAR_TOKEN }}" ]; then
+            echo 'SONAR_TOKEN is set ✅'
+          else
+            echo 'SONAR_TOKEN is not available ❌'
+            echo 'Scan will create ephemeral config and attempt to run'
+          fi
+
+      - name: 'Run SonarQube Cloud Scan on Maven project'
+        if: steps.maven-project.outputs.type == 'file'
+        uses: ./
+        with:
+          sonar_token: '${{ secrets.SONAR_TOKEN }}'
+          no_checkout: 'true'
+          debug: 'true'
+          project_base_dir: 'rappmanager'
+
+  ### Test the GitHub Action in local repository ###
+  test-local:
+    name: 'Test local scan'
+    runs-on: 'ubuntu-latest'
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+    timeout-minutes: 10
+    steps:
+      - name: 'Checkout repository'
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: 'Test secrets are available'
+        run: |
+          # Test secrets are available
+          if [ -n "${{ secrets.SONAR_TOKEN }}" ]; then
+            echo 'SONAR_TOKEN is set ✅'
+          else
+            echo 'SONAR_TOKEN is not available ❌'
+            echo 'Scan will create ephemeral config and attempt to run'
+          fi
+
+      - name: 'Run local action scan'
         uses: ./
         with:
           no_checkout: 'true'
-          sonar_token: "${{  secrets.SONAR_TOKEN }}"
+          sonar_token: '${{ secrets.SONAR_TOKEN }}'
           debug: 'true'
