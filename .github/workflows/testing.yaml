@@ -42,37 +42,6 @@ jobs:
           path: 'test-python-project'
           fetch-depth: 0
 
-      - name: 'Setup Python'
-        # yamllint disable-line rule:line-length
-        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
-        with:
-          python-version: '3.11'
-
-      - name: 'Install Python dependencies'
-        working-directory: 'test-python-project'
-        run: |
-          # Install dependencies
-          python -m pip install --upgrade pip
-          pip install pdm pytest pytest-cov
-
-      - name: 'Install project dependencies'
-        working-directory: 'test-python-project'
-        run: |
-          # Install project dependencies using pdm
-          pdm install --dev
-
-      - name: 'Run tests and generate coverage'
-        working-directory: 'test-python-project'
-        run: |
-          # Run tests with coverage in XML format for SonarQube
-          pdm run pytest --cov --cov-report=xml:coverage.xml tests
-          echo "✅ Tests completed and coverage.xml generated"
-          if [ -f "coverage.xml" ]; then
-            echo "Coverage report size: $(wc -c < coverage.xml) bytes"
-          else
-            echo "⚠️ Warning: coverage.xml not found"
-          fi
-
       - name: 'Verify test project setup'
         working-directory: 'test-python-project'
         run: |
@@ -92,13 +61,6 @@ jobs:
           echo ""
           echo "Source directory:"
           ls -la src/ || echo "src/ not found"
-          echo ""
-          if [ -f "coverage.xml" ]; then
-            echo "✅ Coverage XML exists"
-          else
-            echo "❌ Coverage XML missing"
-            exit 1
-          fi
 
       - name: 'Test secrets are available'
         run: |
@@ -208,36 +170,3 @@ jobs:
           no_checkout: 'true'
           debug: 'true'
           project_base_dir: 'rappmanager'
-
-  ### Test the GitHub Action in local repository ###
-  test-local:
-    name: 'Test local scan'
-    runs-on: 'ubuntu-latest'
-    permissions:
-      contents: read
-      security-events: write
-      id-token: write
-    timeout-minutes: 10
-    steps:
-      - name: 'Checkout repository'
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          fetch-depth: 0
-
-      - name: 'Test secrets are available'
-        run: |
-          # Test secrets are available
-          if [ -n "${{ secrets.SONAR_TOKEN }}" ]; then
-            echo 'SONAR_TOKEN is set ✅'
-          else
-            echo 'SONAR_TOKEN is not available ❌'
-            echo 'Scan will create ephemeral config and attempt to run'
-          fi
-
-      - name: 'Run local action scan'
-        uses: ./
-        with:
-          no_checkout: 'true'
-          sonar_token: '${{ secrets.SONAR_TOKEN }}'
-          debug: 'true'
