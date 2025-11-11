@@ -6,7 +6,8 @@
 name: '🔐 SonarCube Cloud Scan'
 description: 'Performs a SonarQube Cloud scan and uploads the results'
 
-# yamllint disable-line rule:line-length
+# yamllint disable rule:line-length
+
 # See: https://docs.sonarsource.com/sonarqube-server/latest/project-administration/analysis-scope/
 # Create a file at the top of the repository called:
 #   sonar-project.properties
@@ -15,152 +16,142 @@ description: 'Performs a SonarQube Cloud scan and uploads the results'
 # sonar.tests = test/
 
 inputs:
-  # Note: types are not enforced for composite actions and fail schema checks
-  # But are useful for documentation purposes and will be commented out
-
   # Mandatory
   sonar_token:
     description: 'SonarQube API key/token'
     required: true
-    # type: string
-
   # Optional
   no_checkout:
     description: 'Do not checkout local repository; used for testing'
     required: false
     default: 'false'
-    # type: boolean
   sonar_root_cert:
     description: 'Server root certificate PEM encoded'
     required: false
-    # type: 'string'
   build_wrapper_url:
-    # yamllint disable-line rule:line-length
     # e.g. https://raw.githubusercontent.com/o-ran-sc/ci-management/refs/heads/master/jjb/com-golog/prescan-golog-go-ubuntu.sh
     description: 'Download location of build wrapper/script'
     required: false
-    # type: string
   build_wrapper_out_dir:
     description: 'Filesystem location of build outputs'
     required: false
-    # type: string
   sonar_host_url:
     description: 'Uploads scans to the given host URL'
     required: false
     default: 'https://sonarcloud.io'
-    # type: string
   lc_all:
-    # yamllint disable-line rule:line-length
     description: 'Change when code character set is outside the range of en_US.UTF-8'
     required: false
     default: "en_US.UTF-8"
-    # type: string
   debug:
     description: 'Enable debugging output'
     required: false
     default: 'false'
-    # type: boolean
   github_token:
-    # yamllint disable-line rule:line-length
     description: 'GitHub token for API access (optional, improves metadata accuracy)'
     required: false
     default: ''
-    # type: string
   project_base_dir:
     description: 'Set the sonar.projectBaseDir analysis property'
     required: false
     default: '.'
-    # type: string
   scanner_version:
     description: 'Version of the Sonar Scanner CLI to use'
     required: false
-    # type: string
   args:
-    # yamllint disable-line rule:line-length
     description: 'Arguments to pass to the Sonar Scanner CLI (e.g., "-Dsonar.verbose=true")'
     required: false
     default: '-Dsonar.scanner.cache.enabled=false'
-    # type: string
+
+outputs:
+  sonar_org:
+    description: 'SonarQube organization'
+    value: ${{ steps.sonar-config.outputs.sonar_org }}
+  project_key:
+    description: 'SonarQube project key'
+    value: ${{ steps.sonar-config.outputs.project_key }}
+  config_file:
+    description: 'Path to SonarQube configuration file'
+    value: ${{ steps.sonar-config.outputs.config_file }}
 
 runs:
   using: 'composite'
   steps:
     - name: 'Checkout repository'
       if: inputs.no_checkout != 'true'
-      # yamllint disable-line rule:line-length
       uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       with:
-        # Disabling shallow clones is recommended
-        # This improves the relevancy of reporting output
+        # Disabling shallow clones recommended to improve reporting accuracy
         fetch-depth: 0
 
     - name: 'Repository metadata'
       id: repository-metadata
-      # yamllint disable-line rule:line-length
       uses: lfreleng-actions/repository-metadata-action@8462ed1e666c78ae4b48667aa2fbc6101ed0a542 # v0.1.1
       with:
         github_token: ${{ inputs.github_token }}
 
-    - name: 'Check for SonarQube project configuration'
-      id: sonar-project-properties
-      # yamllint disable-line rule:line-length
-      uses: lfreleng-actions/path-check-action@aa7dabfa92e50e31a0f091dd3e2741692e8dde07 # v0.1.5
-      with:
-        path: '${{ inputs.project_base_dir }}/sonar-project.properties'
-
-    - name: 'Check for SonarQube project configuration'
-      id: sonarcloud-properties
-      # yamllint disable-line rule:line-length
-      uses: lfreleng-actions/path-check-action@aa7dabfa92e50e31a0f091dd3e2741692e8dde07 # v0.1.5
-      with:
-        path: '${{ inputs.project_base_dir }}/.sonarcloud.properties'
-
-    # yamllint disable rule:line-length
-
-    - name: 'Warning: missing SonarQube configuration'
-      if:
-        # yamllint disable-line rule:line-length
-        steps.sonar-project-properties.outputs.type != 'file' && steps.sonarcloud-properties.outputs.type != 'file'
+    - name: 'Process SonarQube configuration'
+      id: sonar-config
       shell: bash
       run: |
-        # SonarQube configuration warning
-        echo '⚠️ Repository is missing a SonarQube configuration file'
-        echo 'Check the documentation for further details:'
-        echo 'https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/analysis-parameters/'
-        echo '### ⚠️ Repository is missing a SonarQube configuration file' >> "$GITHUB_STEP_SUMMARY"
-        echo 'Check the documentation for further details:' >> "$GITHUB_STEP_SUMMARY"
-        echo 'https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/analysis-parameters/' \
-          >> "$GITHUB_STEP_SUMMARY"
-        # Create an ephemeral configuration file
-        CONFIG_PATH="${{ inputs.project_base_dir }}/sonar-project.properties"
-        mkdir -p "$(dirname "$CONFIG_PATH")"
-        cat > "$CONFIG_PATH" <<EOF
+        # Process SonarQube configuration
+        SONAR_PROPS="${{ inputs.project_base_dir }}/sonar-project.properties"
+        SONARCLOUD_PROPS="${{ inputs.project_base_dir }}/.sonarcloud.properties"
+        CONFIG_FILE=""
+
+        if [ -f "$SONAR_PROPS" ]; then
+          CONFIG_FILE="$SONAR_PROPS"
+        elif [ -f "$SONARCLOUD_PROPS" ]; then
+          CONFIG_FILE="$SONARCLOUD_PROPS"
+        fi
+
+        # If no config file exists, create ephemeral one
+        if [ -z "$CONFIG_FILE" ]; then
+          echo '⚠️ Repository is missing a SonarQube configuration file'
+          echo 'https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/analysis-parameters/'
+          echo '### ⚠️ Repository is missing a SonarQube configuration file' >> "$GITHUB_STEP_SUMMARY"
+          echo 'https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/analysis-parameters/' >> "$GITHUB_STEP_SUMMARY"
+
+          CONFIG_FILE="$SONAR_PROPS"
+          mkdir -p "$(dirname "$CONFIG_FILE")"
+          cat > "$CONFIG_FILE" <<EOF
         sonar.organization=${{ steps.repository-metadata.outputs.repository_owner }}
         sonar.projectKey=${{ steps.repository-metadata.outputs.repository_name }}
         sonar.scm.exclusions.disabled=true
         EOF
-        echo "Created: $CONFIG_PATH"
-        echo 'Containing:'
-        cat "$CONFIG_PATH"
+          echo "Created: $CONFIG_FILE"
+        else
+          echo 'SonarQube configuration present ✅'
+          echo '### SonarQube configuration present ✅' >> "$GITHUB_STEP_SUMMARY"
+        fi
 
-    - name: 'SonarQube configuration present'
-      # yamllint disable-line rule:line-length
-      if: ${{ (steps.sonar-project-properties.outputs.type == 'file') || (steps.sonarcloud-properties.outputs.type == 'file') }}
-      shell: bash
-      run: |
-        # SonarQube configuration present
-        echo 'SonarQube configuration present ✅'
-        echo '### SonarQube configuration present ✅' >> "$GITHUB_STEP_SUMMARY"
+        # Set config_file as step output after potential file creation
+        echo "config_file=$CONFIG_FILE" >> "$GITHUB_OUTPUT"
+
+        # Extract and output configuration values (strip whitespace and quotes)
+        SONAR_ORG=$(grep -E "^sonar.organization=" "$CONFIG_FILE" | cut -d'=' -f2- | xargs || echo "")
+        SONAR_PROJECT_KEY=$(grep -E "^sonar.projectKey=" "$CONFIG_FILE" | cut -d'=' -f2- | xargs || echo "")
+
+        echo "sonar_org=$SONAR_ORG" >> "$GITHUB_OUTPUT"
+        echo "project_key=$SONAR_PROJECT_KEY" >> "$GITHUB_OUTPUT"
+
+        if [ -n "$SONAR_ORG" ]; then
+          echo "- **Organization**: $SONAR_ORG" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        if [ -n "$SONAR_PROJECT_KEY" ]; then
+          echo "- **Project Key**: $SONAR_PROJECT_KEY" >> "$GITHUB_STEP_SUMMARY"
+        fi
 
     - name: 'Download remote build script'
-      if: inputs.BUILD_WRAPPER_URL != ''
-      # yamllint disable-line rule:line-length
+      if: inputs.build_wrapper_url != ''
+
       uses: lfreleng-actions/url-download-action@ece51fd0f08fd2db2eda53b1acd06c4747336c16 # v0.1.3
       with:
         url: ${{ inputs.build_wrapper_url }}
 
     - name: 'Validate required input parameters'
-      if: inputs.BUILD_WRAPPER_URL != ''
+      if: inputs.build_wrapper_url != ''
       shell: bash
       run: |
         # Validate required input parameters
@@ -170,16 +161,16 @@ runs:
         fi
 
     - name: 'Install build wrapper'
-      if: inputs.BUILD_WRAPPER_URL != ''
-      # yamllint disable-line rule:line-length
+      if: inputs.build_wrapper_url != ''
+
       uses: SonarSource/sonarqube-scan-action/install-build-wrapper@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
 
     - name: 'Run build wrapper'
-      if: inputs.BUILD_WRAPPER_URL != ''
+      if: inputs.build_wrapper_url != ''
       shell: bash
       run: |
         # Run build wrapper 🧱
-        BUILD_SCRIPT="./$(basename ${{ inputs.BUILD_WRAPPER_URL }})"
+        BUILD_SCRIPT="./$(basename ${{ inputs.build_wrapper_url }})"
         BUILD_WRAPPER_OUT_DIR="${{ inputs.build_wrapper_out_dir }}"
         chmod u+x "$BUILD_SCRIPT"
         if [ ! -d "$BUILD_WRAPPER_OUT_DIR" ]; then
@@ -193,11 +184,15 @@ runs:
       if: inputs.debug == 'true'
       shell: bash
       run: |
-        # Show local directory context
+        # Debug action/environment
+        CONFIG_FILE="${{ steps.sonar-config.outputs.config_file }}"
         echo "Debug logging enabled 🐞"
         echo "Current directory: $(pwd)"
         echo "GitHub workspace: ${{ github.workspace }}"
         echo "Project base dir: ${{ inputs.project_base_dir }}"
+        if [ -n "$CONFIG_FILE" ]; then
+          echo "Scan configuration file: $CONFIG_FILE"
+        fi
         echo "Directory content (workspace root):"
         ls -la
         if [ "${{ inputs.project_base_dir }}" != "." ]; then
@@ -209,7 +204,7 @@ runs:
     - name: 'SonarQube Scan (with specified scanner version)'
       if: inputs.scanner_version != ''
       id: sonar-scan-versioned
-      # yamllint disable-line rule:line-length
+
       uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
       env:
         SONAR_TOKEN: ${{ inputs.sonar_token }}
@@ -226,7 +221,7 @@ runs:
     - name: 'SonarQube Scan (with default scanner version)'
       if: inputs.scanner_version == ''
       id: sonar-scan-default
-      # yamllint disable-line rule:line-length
+
       uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
       env:
         SONAR_TOKEN: ${{ inputs.sonar_token }}
@@ -239,30 +234,49 @@ runs:
         projectBaseDir: ${{ inputs.project_base_dir }}
         args: ${{ inputs.args }}
 
+    - name: 'Parse scan output'
+      id: parse-output
+      shell: bash
+      run: |
+        # Parse scan output
+        REPORT_TASK_FILE="${{ inputs.project_base_dir }}/.scannerwork/report-task.txt"
+
+        if [ -f "$REPORT_TASK_FILE" ]; then
+          echo "Scanner report task file found 📁"
+        else
+          echo "Scanner report task file not found 🚫"
+        fi
+
+        # Check for NOT_BOUND in report-task.txt
+        if [ -f "$REPORT_TASK_FILE" ] && grep -q "NOT_BOUND" "$REPORT_TASK_FILE"; then
+          echo "not_bound=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "not_bound=false" >> "$GITHUB_OUTPUT"
+        fi
+
+        # Output report file path for reuse in subsequent steps
+        echo "report_task_file=$REPORT_TASK_FILE" >> "$GITHUB_OUTPUT"
+
     - name: 'Print summary/job output'
       shell: bash
       # yamllint disable rule:line-length
       run: |
         # Print summary/job output
         # Extract the dashboard URL from .scannerwork/report-task.txt if available
+        DEBUG_MODE="${{ inputs.debug }}"
         DASHBOARD_URL=""
-        REPORT_TASK_FILE="${{ inputs.project_base_dir }}/.scannerwork/report-task.txt"
+        REPORT_TASK_FILE="${{ steps.parse-output.outputs.report_task_file }}"
+
+        # Extract PROJECT_KEY early so it's available for NOT_BOUND warning
+        PROJECT_KEY="${{ steps.sonar-config.outputs.project_key }}"
+
+        # Extract dashboard URL from report-task.txt
         if [ -f "$REPORT_TASK_FILE" ]; then
           DASHBOARD_URL=$(grep -E "^dashboardUrl=" "$REPORT_TASK_FILE" | cut -d'=' -f2-)
         fi
 
         # Fallback to constructing URL if not found in report-task.txt
         if [ -z "$DASHBOARD_URL" ]; then
-          # Read project key from sonar-project.properties or .sonarcloud.properties
-          PROJECT_KEY=""
-          SONAR_PROPS="${{ inputs.project_base_dir }}/sonar-project.properties"
-          SONARCLOUD_PROPS="${{ inputs.project_base_dir }}/.sonarcloud.properties"
-          if [ -f "$SONAR_PROPS" ]; then
-            PROJECT_KEY=$(grep -E "^sonar.projectKey=" "$SONAR_PROPS" | cut -d'=' -f2- | tr -d ' ')
-          elif [ -f "$SONARCLOUD_PROPS" ]; then
-            PROJECT_KEY=$(grep -E "^sonar.projectKey=" "$SONARCLOUD_PROPS" | cut -d'=' -f2- | tr -d ' ')
-          fi
-
           if [ -n "$PROJECT_KEY" ]; then
             DASHBOARD_URL="https://sonarcloud.io/dashboard?id=${PROJECT_KEY}"
           else
@@ -271,5 +285,28 @@ runs:
           fi
         fi
 
+        # Debug output consolidated in one code block
+        if [ "$DEBUG_MODE" = "true" ]; then
+          echo "Debug: Checking for report-task.txt at: $REPORT_TASK_FILE"
+          if [ -f "$REPORT_TASK_FILE" ]; then
+            echo "Debug: report-task.txt found, contents:"
+            cat "$REPORT_TASK_FILE"
+          else
+            echo "Debug: report-task.txt not found"
+          fi
+          echo "Debug: PROJECT_KEY=$PROJECT_KEY"
+          echo "Debug: Final dashboard URL: $DASHBOARD_URL"
+        fi
+
         echo '## 🔐 SonarQube Cloud Scan Results Updated' >> "$GITHUB_STEP_SUMMARY"
         echo "🔗 ${DASHBOARD_URL}" >> "$GITHUB_STEP_SUMMARY"
+
+        # Check for NOT_BOUND condition
+        if [ "${{ steps.parse-output.outputs.not_bound }}" = "true" ]; then
+          echo "⚠️ WARNING: Project is NOT_BOUND to GitHub repository"
+          echo "### ⚠️ Project Binding Warning" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "The SonarCloud project exists in SonarCloud but is not linked to your GitHub repository." >> "$GITHUB_STEP_SUMMARY"
+          echo "See: https://docs.sonarsource.com/sonarqube-cloud/getting-started/github" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+        fi
