@@ -74,7 +74,6 @@ inputs:
   scanner_version:
     description: 'Version of the Sonar Scanner CLI to use'
     required: false
-    default: ''
     # type: string
   args:
     # yamllint disable-line rule:line-length
@@ -107,14 +106,14 @@ runs:
       # yamllint disable-line rule:line-length
       uses: lfreleng-actions/path-check-action@aa7dabfa92e50e31a0f091dd3e2741692e8dde07 # v0.1.5
       with:
-        path: 'sonar-project.properties'
+        path: '${{ inputs.project_base_dir }}/sonar-project.properties'
 
     - name: 'Check for SonarQube project configuration'
       id: sonarcloud-properties
       # yamllint disable-line rule:line-length
       uses: lfreleng-actions/path-check-action@aa7dabfa92e50e31a0f091dd3e2741692e8dde07 # v0.1.5
       with:
-        path: '.sonarcloud.properties'
+        path: '${{ inputs.project_base_dir }}/.sonarcloud.properties'
 
     # yamllint disable rule:line-length
 
@@ -133,14 +132,16 @@ runs:
         echo 'https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/analysis-parameters/' \
           >> "$GITHUB_STEP_SUMMARY"
         # Create an ephemeral configuration file
-        cat > sonar-project.properties <<EOF
+        CONFIG_PATH="${{ inputs.project_base_dir }}/sonar-project.properties"
+        mkdir -p "$(dirname "$CONFIG_PATH")"
+        cat > "$CONFIG_PATH" <<EOF
         sonar.organization=${{ steps.repository-metadata.outputs.repository_owner }}
         sonar.projectKey=${{ steps.repository-metadata.outputs.repository_name }}
         sonar.scm.exclusions.disabled=true
         EOF
-        echo 'Created: sonar-project.properties'
+        echo "Created: $CONFIG_PATH"
         echo 'Containing:'
-        cat sonar-project.properties
+        cat "$CONFIG_PATH"
 
     - name: 'SonarQube configuration present'
       # yamllint disable-line rule:line-length
@@ -196,11 +197,18 @@ runs:
         echo "Debug logging enabled 🐞"
         echo "Current directory: $(pwd)"
         echo "GitHub workspace: ${{ github.workspace }}"
-        echo "Directory content:"
+        echo "Project base dir: ${{ inputs.project_base_dir }}"
+        echo "Directory content (workspace root):"
         ls -la
+        if [ "${{ inputs.project_base_dir }}" != "." ]; then
+          echo ""
+          echo "Directory content (project base dir):"
+          ls -la "${{ inputs.project_base_dir }}" || echo "Project base dir not found"
+        fi
 
-    - name: 'SonarQube Scan'
-      id: sonar-scan
+    - name: 'SonarQube Scan (with specified scanner version)'
+      if: inputs.scanner_version != ''
+      id: sonar-scan-versioned
       # yamllint disable-line rule:line-length
       uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
       env:
@@ -215,6 +223,22 @@ runs:
         scannerVersion: ${{ inputs.scanner_version }}
         args: ${{ inputs.args }}
 
+    - name: 'SonarQube Scan (with default scanner version)'
+      if: inputs.scanner_version == ''
+      id: sonar-scan-default
+      # yamllint disable-line rule:line-length
+      uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
+      env:
+        SONAR_TOKEN: ${{ inputs.sonar_token }}
+        SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
+        SONAR_ROOT_CERT: ${{ inputs.sonar_root_cert }}
+        SONAR_VERBOSE: ${{ inputs.debug }}
+        LC_ALL: ${{ inputs.lc_all }}
+        SONAR_SCANNER_OPTS: "-Dsonar.scanner.skipJreProvisioning=true"
+      with:
+        projectBaseDir: ${{ inputs.project_base_dir }}
+        args: ${{ inputs.args }}
+
     - name: 'Print summary/job output'
       shell: bash
       # yamllint disable rule:line-length
@@ -222,18 +246,21 @@ runs:
         # Print summary/job output
         # Extract the dashboard URL from .scannerwork/report-task.txt if available
         DASHBOARD_URL=""
-        if [ -f ".scannerwork/report-task.txt" ]; then
-          DASHBOARD_URL=$(grep -E "^dashboardUrl=" .scannerwork/report-task.txt | cut -d'=' -f2-)
+        REPORT_TASK_FILE="${{ inputs.project_base_dir }}/.scannerwork/report-task.txt"
+        if [ -f "$REPORT_TASK_FILE" ]; then
+          DASHBOARD_URL=$(grep -E "^dashboardUrl=" "$REPORT_TASK_FILE" | cut -d'=' -f2-)
         fi
 
         # Fallback to constructing URL if not found in report-task.txt
         if [ -z "$DASHBOARD_URL" ]; then
           # Read project key from sonar-project.properties or .sonarcloud.properties
           PROJECT_KEY=""
-          if [ -f "sonar-project.properties" ]; then
-            PROJECT_KEY=$(grep -E "^sonar.projectKey=" sonar-project.properties | cut -d'=' -f2- | tr -d ' ')
-          elif [ -f ".sonarcloud.properties" ]; then
-            PROJECT_KEY=$(grep -E "^sonar.projectKey=" .sonarcloud.properties | cut -d'=' -f2- | tr -d ' ')
+          SONAR_PROPS="${{ inputs.project_base_dir }}/sonar-project.properties"
+          SONARCLOUD_PROPS="${{ inputs.project_base_dir }}/.sonarcloud.properties"
+          if [ -f "$SONAR_PROPS" ]; then
+            PROJECT_KEY=$(grep -E "^sonar.projectKey=" "$SONAR_PROPS" | cut -d'=' -f2- | tr -d ' ')
+          elif [ -f "$SONARCLOUD_PROPS" ]; then
+            PROJECT_KEY=$(grep -E "^sonar.projectKey=" "$SONARCLOUD_PROPS" | cut -d'=' -f2- | tr -d ' ')
           fi
 
           if [ -n "$PROJECT_KEY" ]; then
