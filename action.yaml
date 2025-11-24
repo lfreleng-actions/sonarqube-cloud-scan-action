@@ -201,9 +201,8 @@ runs:
           ls -la "${{ inputs.project_base_dir }}" || echo "Project base dir not found"
         fi
 
-    - name: 'SonarQube Scan (with specified scanner version)'
-      if: inputs.scanner_version != ''
-      id: sonar-scan-versioned
+    - name: 'SonarQube Scan'
+      id: sonar-scan
 
       uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
       env:
@@ -215,23 +214,7 @@ runs:
         SONAR_SCANNER_OPTS: "-Dsonar.scanner.skipJreProvisioning=true"
       with:
         projectBaseDir: ${{ inputs.project_base_dir }}
-        scannerVersion: ${{ inputs.scanner_version }}
-        args: ${{ inputs.args }}
-
-    - name: 'SonarQube Scan (with default scanner version)'
-      if: inputs.scanner_version == ''
-      id: sonar-scan-default
-
-      uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
-      env:
-        SONAR_TOKEN: ${{ inputs.sonar_token }}
-        SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
-        SONAR_ROOT_CERT: ${{ inputs.sonar_root_cert }}
-        SONAR_VERBOSE: ${{ inputs.debug }}
-        LC_ALL: ${{ inputs.lc_all }}
-        SONAR_SCANNER_OPTS: "-Dsonar.scanner.skipJreProvisioning=true"
-      with:
-        projectBaseDir: ${{ inputs.project_base_dir }}
+        scannerVersion: ${{ inputs.scanner_version || '7.2.0.5079' }}
         args: ${{ inputs.args }}
 
     - name: 'Parse scan output'
