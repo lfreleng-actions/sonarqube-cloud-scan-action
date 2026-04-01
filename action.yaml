@@ -163,7 +163,7 @@ runs:
     - name: 'Install build wrapper'
       if: inputs.build_wrapper_url != ''
 
-      uses: SonarSource/sonarqube-scan-action/install-build-wrapper@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7.0.0
+      uses: SonarSource/sonarqube-scan-action/install-build-wrapper@299e4b793aaa83bf2aba7c9c14bedbb485688ec4 # v7.1.0
 
     - name: 'Run build wrapper'
       if: inputs.build_wrapper_url != ''
@@ -204,7 +204,7 @@ runs:
     - name: 'SonarQube Scan'
       id: sonar-scan
 
-      uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9 # v7.0.0
+      uses: SonarSource/sonarqube-scan-action@299e4b793aaa83bf2aba7c9c14bedbb485688ec4 # v7.1.0
       env:
         SONAR_TOKEN: ${{ inputs.sonar_token }}
         SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
