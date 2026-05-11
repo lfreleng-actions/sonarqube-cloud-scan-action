@@ -58,6 +58,14 @@ inputs:
   scanner_version:
     description: 'Version of the Sonar Scanner CLI to use'
     required: false
+  skip_jre_provisioning:
+    # SonarSource is deprecating the bundled Java 17 runtime; support
+    # ends July 2026. Letting the scanner provision its own JRE keeps
+    # the runtime current automatically.
+    # See: https://docs.sonarsource.com/sonarqube-server/analyzing-source-code/scanners/scanner-environment/managing-jre-auto-provisioning/
+    description: 'Skip JRE auto-provisioning by the Sonar Scanner CLI'
+    required: false
+    default: 'false'
   args:
     description: 'Arguments to pass to the Sonar Scanner CLI (e.g., "-Dsonar.verbose=true")'
     required: false
@@ -211,7 +219,7 @@ runs:
         SONAR_ROOT_CERT: ${{ inputs.sonar_root_cert }}
         SONAR_VERBOSE: ${{ inputs.debug }}
         LC_ALL: ${{ inputs.lc_all }}
-        SONAR_SCANNER_OPTS: "-Dsonar.scanner.skipJreProvisioning=true"
+        SONAR_SCANNER_OPTS: "-Dsonar.scanner.skipJreProvisioning=${{ inputs.skip_jre_provisioning }}"
       with:
         projectBaseDir: ${{ inputs.project_base_dir }}
         scannerVersion: ${{ inputs.scanner_version || '7.2.0.5079' }}
