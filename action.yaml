@@ -91,6 +91,7 @@ runs:
       with:
         # Disabling shallow clones recommended to improve reporting accuracy
         fetch-depth: 0
+        persist-credentials: false
 
     - name: 'Repository metadata'
       id: repository-metadata
@@ -101,10 +102,14 @@ runs:
     - name: 'Process SonarQube configuration'
       id: sonar-config
       shell: bash
+      env:
+        PROJECT_BASE_DIR: ${{ inputs.project_base_dir }}
+        REPO_OWNER: ${{ steps.repository-metadata.outputs.repository_owner }}
+        REPO_NAME: ${{ steps.repository-metadata.outputs.repository_name }}
       run: |
         # Process SonarQube configuration
-        SONAR_PROPS="${{ inputs.project_base_dir }}/sonar-project.properties"
-        SONARCLOUD_PROPS="${{ inputs.project_base_dir }}/.sonarcloud.properties"
+        SONAR_PROPS="$PROJECT_BASE_DIR/sonar-project.properties"
+        SONARCLOUD_PROPS="$PROJECT_BASE_DIR/.sonarcloud.properties"
         CONFIG_FILE=""
 
         if [ -f "$SONAR_PROPS" ]; then
@@ -123,8 +128,8 @@ runs:
           CONFIG_FILE="$SONAR_PROPS"
           mkdir -p "$(dirname "$CONFIG_FILE")"
           cat > "$CONFIG_FILE" <<EOF
-        sonar.organization=${{ steps.repository-metadata.outputs.repository_owner }}
-        sonar.projectKey=${{ steps.repository-metadata.outputs.repository_name }}
+        sonar.organization=${REPO_OWNER}
+        sonar.projectKey=${REPO_NAME}
         sonar.scm.exclusions.disabled=true
         EOF
           echo "Created: $CONFIG_FILE"
@@ -161,9 +166,11 @@ runs:
     - name: 'Validate required input parameters'
       if: inputs.build_wrapper_url != ''
       shell: bash
+      env:
+        BUILD_WRAPPER_OUT_DIR: ${{ inputs.build_wrapper_out_dir }}
       run: |
         # Validate required input parameters
-        if [ -z "${{ inputs.build_wrapper_out_dir }}" ]; then
+        if [ -z "$BUILD_WRAPPER_OUT_DIR" ]; then
           echo 'Error: build outputs directory must be specified when using a build wrapper ❌'
           exit 1
         fi
@@ -176,10 +183,12 @@ runs:
     - name: 'Run build wrapper'
       if: inputs.build_wrapper_url != ''
       shell: bash
+      env:
+        BUILD_WRAPPER_URL: ${{ inputs.build_wrapper_url }}
+        BUILD_WRAPPER_OUT_DIR: ${{ inputs.build_wrapper_out_dir }}
       run: |
         # Run build wrapper 🧱
-        BUILD_SCRIPT="./$(basename ${{ inputs.build_wrapper_url }})"
-        BUILD_WRAPPER_OUT_DIR="${{ inputs.build_wrapper_out_dir }}"
+        BUILD_SCRIPT="./$(basename "$BUILD_WRAPPER_URL")"
         chmod u+x "$BUILD_SCRIPT"
         if [ ! -d "$BUILD_WRAPPER_OUT_DIR" ]; then
           mkdir -p "$BUILD_WRAPPER_OUT_DIR"
@@ -191,22 +200,26 @@ runs:
     - name: 'Debug action/environment'
       if: inputs.debug == 'true'
       shell: bash
+      env:
+        PROJECT_BASE_DIR: ${{ inputs.project_base_dir }}
+        CONFIG_FILE_PATH: ${{ steps.sonar-config.outputs.config_file }}
+        WORKSPACE: ${{ github.workspace }}
       run: |
         # Debug action/environment
-        CONFIG_FILE="${{ steps.sonar-config.outputs.config_file }}"
+        CONFIG_FILE="$CONFIG_FILE_PATH"
         echo "Debug logging enabled 🐞"
         echo "Current directory: $(pwd)"
-        echo "GitHub workspace: ${{ github.workspace }}"
-        echo "Project base dir: ${{ inputs.project_base_dir }}"
+        echo "GitHub workspace: $WORKSPACE"
+        echo "Project base dir: $PROJECT_BASE_DIR"
         if [ -n "$CONFIG_FILE" ]; then
           echo "Scan configuration file: $CONFIG_FILE"
         fi
         echo "Directory content (workspace root):"
         ls -la
-        if [ "${{ inputs.project_base_dir }}" != "." ]; then
+        if [ "$PROJECT_BASE_DIR" != "." ]; then
           echo ""
           echo "Directory content (project base dir):"
-          ls -la "${{ inputs.project_base_dir }}" || echo "Project base dir not found"
+          ls -la "$PROJECT_BASE_DIR" || echo "Project base dir not found"
         fi
 
     - name: 'SonarQube Scan'
@@ -228,9 +241,11 @@ runs:
     - name: 'Parse scan output'
       id: parse-output
       shell: bash
+      env:
+        PROJECT_BASE_DIR: ${{ inputs.project_base_dir }}
       run: |
         # Parse scan output
-        REPORT_TASK_FILE="${{ inputs.project_base_dir }}/.scannerwork/report-task.txt"
+        REPORT_TASK_FILE="$PROJECT_BASE_DIR/.scannerwork/report-task.txt"
 
         if [ -f "$REPORT_TASK_FILE" ]; then
           echo "Scanner report task file found 📁"
@@ -251,15 +266,22 @@ runs:
     - name: 'Print summary/job output'
       shell: bash
       # yamllint disable rule:line-length
+      env:
+        DEBUG: ${{ inputs.debug }}
+        REPORT_TASK_FILE_PATH: ${{ steps.parse-output.outputs.report_task_file }}
+        PROJECT_KEY_IN: ${{ steps.sonar-config.outputs.project_key }}
+        REPO_OWNER: ${{ steps.repository-metadata.outputs.repository_owner }}
+        REPO_NAME: ${{ steps.repository-metadata.outputs.repository_name }}
+        NOT_BOUND: ${{ steps.parse-output.outputs.not_bound }}
       run: |
         # Print summary/job output
         # Extract the dashboard URL from .scannerwork/report-task.txt if available
-        DEBUG_MODE="${{ inputs.debug }}"
+        DEBUG_MODE="$DEBUG"
         DASHBOARD_URL=""
-        REPORT_TASK_FILE="${{ steps.parse-output.outputs.report_task_file }}"
+        REPORT_TASK_FILE="$REPORT_TASK_FILE_PATH"
 
         # Extract PROJECT_KEY early so it's available for NOT_BOUND warning
-        PROJECT_KEY="${{ steps.sonar-config.outputs.project_key }}"
+        PROJECT_KEY="$PROJECT_KEY_IN"
 
         # Extract dashboard URL from report-task.txt
         if [ -f "$REPORT_TASK_FILE" ]; then
@@ -272,7 +294,7 @@ runs:
             DASHBOARD_URL="https://sonarcloud.io/dashboard?id=${PROJECT_KEY}"
           else
             # Last resort: use repository metadata
-            DASHBOARD_URL="https://sonarcloud.io/project/overview?id=${{ steps.repository-metadata.outputs.repository_owner }}_${{ steps.repository-metadata.outputs.repository_name }}"
+            DASHBOARD_URL="https://sonarcloud.io/project/overview?id=${REPO_OWNER}_${REPO_NAME}"
           fi
         fi
 
@@ -293,7 +315,7 @@ runs:
         echo "🔗 ${DASHBOARD_URL}" >> "$GITHUB_STEP_SUMMARY"
 
         # Check for NOT_BOUND condition
-        if [ "${{ steps.parse-output.outputs.not_bound }}" = "true" ]; then
+        if [ "$NOT_BOUND" = "true" ]; then
           echo "⚠️ WARNING: Project is NOT_BOUND to GitHub repository"
           echo "### ⚠️ Project Binding Warning" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
