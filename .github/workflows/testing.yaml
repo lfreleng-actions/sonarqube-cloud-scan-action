@@ -33,6 +33,8 @@ jobs:
       - name: 'Checkout action'
         # yamllint disable-line rule:line-length
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
       - name: 'Checkout test-python-project'
         # yamllint disable-line rule:line-length
@@ -41,6 +43,7 @@ jobs:
           repository: 'lfreleng-actions/test-python-project'
           path: 'test-python-project'
           fetch-depth: 0
+          persist-credentials: false
 
       - name: 'Verify test project setup'
         working-directory: 'test-python-project'
@@ -93,6 +96,8 @@ jobs:
       - name: 'Checkout action'
         # yamllint disable-line rule:line-length
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
       - name: 'Checkout rappmanager repository'
         # yamllint disable-line rule:line-length
@@ -101,6 +106,7 @@ jobs:
           repository: 'o-ran-sc/nonrtric-plt-rappmanager'
           path: 'rappmanager'
           fetch-depth: 0
+          persist-credentials: false
 
       - name: 'Check for file: pom.xml'
         id: maven-project
