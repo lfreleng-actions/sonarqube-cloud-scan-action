@@ -24,10 +24,14 @@ jobs:
   test-python-project:
     name: 'Test with Python Project'
     runs-on: 'ubuntu-latest'
+    # Run this job in a dedicated environment so its execution and any
+    # environment-scoped secrets can be gated by environment protection
+    # rules (satisfies zizmor's secrets-outside-env).
+    environment: 'development'
     permissions:
       contents: read
-      security-events: write
-      id-token: write
+      security-events: write  # Upload scan results to code scanning
+      id-token: write  # Enable optional OIDC auth to SonarQube Cloud
     timeout-minutes: 15
     steps:
       - name: 'Checkout action'
@@ -66,9 +70,11 @@ jobs:
           ls -la src/ || echo "src/ not found"
 
       - name: 'Test secrets are available'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           # Test secrets are available
-          if [ -n "${{ secrets.SONAR_TOKEN }}" ]; then
+          if [ -n "${SONAR_TOKEN}" ]; then
             echo 'SONAR_TOKEN is set ✅'
           else
             echo 'SONAR_TOKEN is not available ❌'
@@ -87,10 +93,14 @@ jobs:
   test-java-maven:
     name: 'Test with Java Maven Project'
     runs-on: 'ubuntu-latest'
+    # Run this job in a dedicated environment so its execution and any
+    # environment-scoped secrets can be gated by environment protection
+    # rules (satisfies zizmor's secrets-outside-env).
+    environment: 'development'
     permissions:
       contents: read
-      security-events: write
-      id-token: write
+      security-events: write  # Upload scan results to code scanning
+      id-token: write  # Enable optional OIDC auth to SonarQube Cloud
     timeout-minutes: 20
     steps:
       - name: 'Checkout action'
@@ -159,9 +169,11 @@ jobs:
           find . -type d -name "target" | head -10
 
       - name: 'Test secrets are available'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           # Test secrets are available
-          if [ -n "${{ secrets.SONAR_TOKEN }}" ]; then
+          if [ -n "${SONAR_TOKEN}" ]; then
             echo 'SONAR_TOKEN is set ✅'
           else
             echo 'SONAR_TOKEN is not available ❌'
