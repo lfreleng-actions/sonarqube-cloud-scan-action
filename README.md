@@ -194,19 +194,20 @@ For information on the build wrapper for C language based projects:
 
 <!-- markdownlint-disable MD013 -->
 
-| Variable Name         | Required | Default                             | Description                                                              |
-| --------------------- | -------- | ----------------------------------- | ------------------------------------------------------------------------ |
-| sonar_token           | True     | N/A                                 | Mandatory authentication token to upload results                         |
-| sonar_root_cert       | False    | N/A                                 | PEM encoded server root certificate (for HTTPS upload)                   |
-| build_wrapper_url     | False    | N/A                                 | Download location of build wrapper/shell script                          |
-| build_wrapper_out_dir | False    | N/A                                 | Local filesystem location of build artefacts                             |
-| sonar_host_url        | False    | <https://sonarcloud.io>             | Uploads scans to the given host URL                                      |
-| lc_all                | False    | en_US.UTF-8                         | Locale for code base (if not covered by en_US.UTF-8)                     |
-| debug                 | False    | false                               | Enable debugging output                                                  |
-| project_base_dir      | False    | .                                   | Set the sonar.projectBaseDir analysis property                           |
-| scanner_version       | False    | (uses SonarSource action's default) | Version of the Sonar Scanner CLI to use                                  |
-| skip_jre_provisioning | False    | false                               | Skip JRE auto-provisioning by the Sonar Scanner CLI (see note below)     |
-| args                  | False    | -Dsonar.scanner.cache.enabled=false | Arguments to pass to the Sonar Scanner CLI                               |
+| Variable Name         | Required | Default                             | Description                                                                                                                            |
+| --------------------- | -------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| sonar_token           | True     | N/A                                 | Mandatory authentication token to upload results                                                                                       |
+| sonar_root_cert       | False    | N/A                                 | PEM encoded server root certificate (for HTTPS upload)                                                                                 |
+| build_wrapper_url     | False    | N/A                                 | HTTPS download location of build wrapper/shell script                                                                                  |
+| build_wrapper_out_dir | False    | N/A                                 | Local filesystem location of build artefacts                                                                                           |
+| prescan_script_url    | False    | N/A                                 | HTTPS URL of a script run with bash after checkout, before scan, WITHOUT the build wrapper (mutually exclusive with build_wrapper_url) |
+| sonar_host_url        | False    | <https://sonarcloud.io>             | Uploads scans to the given host URL                                                                                                    |
+| lc_all                | False    | en_US.UTF-8                         | Locale for code base (if not covered by en_US.UTF-8)                                                                                   |
+| debug                 | False    | false                               | Enable debugging output                                                                                                                |
+| project_base_dir      | False    | .                                   | Set the sonar.projectBaseDir analysis property                                                                                         |
+| scanner_version       | False    | (uses SonarSource action's default) | Version of the Sonar Scanner CLI to use                                                                                                |
+| skip_jre_provisioning | False    | false                               | Skip JRE auto-provisioning by the Sonar Scanner CLI (see note below)                                                                   |
+| args                  | False    | -Dsonar.scanner.cache.enabled=false | Arguments to pass to the Sonar Scanner CLI                                                                                             |
 
 <!-- markdownlint-enable MD013 -->
 

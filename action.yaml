@@ -30,10 +30,20 @@ inputs:
     required: false
   build_wrapper_url:
     # e.g. https://raw.githubusercontent.com/o-ran-sc/ci-management/refs/heads/master/jjb/com-golog/prescan-golog-go-ubuntu.sh
-    description: 'Download location of build wrapper/script'
+    description: 'HTTPS download location of build wrapper/script'
     required: false
   build_wrapper_out_dir:
     description: 'Filesystem location of build outputs'
+    required: false
+  prescan_script_url:
+    # e.g. a Go/Python coverage generator run before the scan.
+    description: >-
+      HTTPS URL of a script to download and execute with bash after
+      checkout but before the scan, WITHOUT the C/C++ build wrapper.
+      Use for languages (Go, Python, ...) that need a pre-scan step
+      such as generating a coverage report, but must not be wrapped
+      by build-wrapper. Must use HTTPS and is mutually exclusive with
+      build_wrapper_url.
     required: false
   sonar_host_url:
     description: 'Uploads scans to the given host URL'
@@ -156,6 +166,38 @@ runs:
           echo "- **Project Key**: $SONAR_PROJECT_KEY" >> "$GITHUB_STEP_SUMMARY"
         fi
 
+    - name: 'Validate pre-scan inputs'
+      if: inputs.build_wrapper_url != '' || inputs.prescan_script_url != ''
+      shell: bash
+      env:
+        BUILD_WRAPPER_URL: ${{ inputs.build_wrapper_url }}
+        PRESCAN_SCRIPT_URL: ${{ inputs.prescan_script_url }}
+      run: |
+        # build_wrapper_url and prescan_script_url are mutually exclusive
+        if [ -n "$BUILD_WRAPPER_URL" ] && [ -n "$PRESCAN_SCRIPT_URL" ]; then
+          echo 'Error: build_wrapper_url and prescan_script_url are mutually exclusive ❌'
+          exit 1
+        fi
+        # Reject insecure URLs before any download occurs
+        if [ -n "$BUILD_WRAPPER_URL" ]; then
+          case "$BUILD_WRAPPER_URL" in
+            https://*) ;;
+            *)
+              echo 'Error: build_wrapper_url must use HTTPS ❌'
+              exit 1
+              ;;
+          esac
+        fi
+        if [ -n "$PRESCAN_SCRIPT_URL" ]; then
+          case "$PRESCAN_SCRIPT_URL" in
+            https://*) ;;
+            *)
+              echo 'Error: prescan_script_url must use HTTPS ❌'
+              exit 1
+              ;;
+          esac
+        fi
+
     - name: 'Download remote build script'
       if: inputs.build_wrapper_url != ''
 
@@ -196,6 +238,33 @@ runs:
         fi
         echo "Running: build-wrapper-linux-x86-64 --out-dir $BUILD_WRAPPER_OUT_DIR $BUILD_SCRIPT"
         build-wrapper-linux-x86-64 --out-dir "$BUILD_WRAPPER_OUT_DIR" "$BUILD_SCRIPT"
+
+    - name: 'Download remote pre-scan script'
+      if: inputs.prescan_script_url != ''
+
+      uses: lfreleng-actions/url-download-action@77920845b3cef96fac9ef287dcff261b24a12341 # v0.1.5
+      with:
+        url: ${{ inputs.prescan_script_url }}
+        # Save outside the workspace (into the runner temp dir) so the
+        # script is never scanned as a source file or clobbers a repo
+        # file, and needs no filename reconstruction from the URL (the
+        # action exposes no outputs).
+        path: ${{ runner.temp }}/prescan-script
+
+    - name: 'Run pre-scan script'
+      if: inputs.prescan_script_url != ''
+      shell: bash
+      env:
+        PRESCAN_SCRIPT: ${{ runner.temp }}/prescan-script
+      run: |
+        # Run pre-scan script (no build wrapper) 🧪
+        if [ ! -f "$PRESCAN_SCRIPT" ]; then
+          echo "Error: pre-scan script not downloaded: $PRESCAN_SCRIPT ❌"
+          exit 1
+        fi
+        chmod u+x "$PRESCAN_SCRIPT"
+        echo "Running pre-scan script: $PRESCAN_SCRIPT"
+        bash -- "$PRESCAN_SCRIPT"
 
     - name: 'Debug action/environment'
       if: inputs.debug == 'true'
