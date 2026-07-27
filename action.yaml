@@ -365,6 +365,7 @@ runs:
         PROJECT_KEY_OVERRIDE: ${{ inputs.sonar_project_key }}
         BRANCH_NAME: ${{ inputs.sonar_branch_name }}
         BRANCH_TARGET: ${{ inputs.sonar_branch_target }}
+        SKIP_JRE: ${{ inputs.skip_jre_provisioning }}
       run: |
         # Assemble the Sonar Scanner CLI arguments
         set -euo pipefail
@@ -386,6 +387,17 @@ runs:
         validate_token 'sonar_project_key' "$PROJECT_KEY_OVERRIDE"
         validate_token 'sonar_branch_name' "$BRANCH_NAME"
         validate_token 'sonar_branch_target' "$BRANCH_TARGET"
+        # skip_jre_provisioning is interpolated into SONAR_SCANNER_OPTS by
+        # the scan step; constrain it to a strict boolean so a crafted
+        # value cannot smuggle extra JVM/scanner options (free-form flags
+        # belong in the 'args' input, which callers already control).
+        case "$SKIP_JRE" in
+          true | false) ;;
+          *)
+            echo "❌ skip_jre_provisioning must be 'true' or 'false'" >&2
+            exit 1
+            ;;
+        esac
         if [ -n "$SONAR_ORG_OVERRIDE" ]; then
           ARGS="$ARGS -Dsonar.organization=$SONAR_ORG_OVERRIDE"
         fi
@@ -463,8 +475,10 @@ runs:
       shell: bash
       env:
         SONAR_TOKEN: ${{ inputs.sonar_token }}
+        SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
         REPORT_TASK_FILE_PATH: ${{ steps.parse-output.outputs.report_task_file }}
         FAIL_ON_QG: ${{ inputs.fail_on_quality_gate }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         # Poll the compute-engine task, then read the quality gate status
         set -euo pipefail
@@ -498,6 +512,32 @@ runs:
           echo "quality_gate_status=$QG_STATUS" >> "$GITHUB_OUTPUT"
           exit 0
         fi
+
+        # The report task file is untrusted workspace content (it can be
+        # committed to the repository or left stale), and the requests
+        # below carry the SONAR_TOKEN credential. Only contact URLs whose
+        # origin (scheme and host) matches the caller-configured
+        # sonar_host_url, so a planted file cannot redirect the
+        # authenticated poll (and the token) to an arbitrary endpoint.
+        # Comparing origins rather than enforcing HTTPS keeps http://
+        # self-hosted configurations working. Skip gracefully on mismatch.
+        # shellcheck source=scripts/url-trust.sh
+        . "$ACTION_PATH/scripts/url-trust.sh"
+        EXPECTED_ORIGIN=$(url_origin "$SONAR_HOST_URL")
+        # A scheme-less sonar_host_url yields no origin to anchor the
+        # comparison; that is a caller configuration error, so fail with
+        # a clear message rather than silently skipping the gate.
+        if [ -z "$EXPECTED_ORIGIN" ]; then
+          echo "❌ sonar_host_url must be a URL with a scheme and host (e.g. https://sonarcloud.io); received: '$SONAR_HOST_URL'" >&2
+          exit 1
+        fi
+        for _url in "$CE_TASK_URL" "$SERVER_URL"; do
+          if [ "$(url_origin "$_url")" != "$EXPECTED_ORIGIN" ]; then
+            echo "⚠️ Report task URL origin does not match sonar_host_url ($EXPECTED_ORIGIN); skipping quality gate"
+            echo "quality_gate_status=$QG_STATUS" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+        done
 
         # SONAR_TOKEN is embedded, inside double quotes, in a curl config
         # file built on stdin. A token containing whitespace, control
@@ -592,6 +632,7 @@ runs:
         NOT_BOUND: ${{ steps.parse-output.outputs.not_bound }}
         QG_STATUS: ${{ steps.quality-gate.outputs.quality_gate_status }}
         SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         # Print summary/job output
         # Extract the dashboard URL from .scannerwork/report-task.txt if available
@@ -608,6 +649,41 @@ runs:
           DASHBOARD_URL=$(grep -E "^dashboardUrl=" "$REPORT_TASK_FILE" | cut -d'=' -f2-)
           SERVER_URL=$(grep -E "^serverUrl=" "$REPORT_TASK_FILE" | cut -d'=' -f2-)
         fi
+
+        # The report task file is untrusted workspace content. Discard
+        # file-derived URLs whose origin (scheme and host) does not match
+        # the trusted sonar_host_url input, so a planted file cannot seed
+        # the job summary or the dashboard_url output with a look-alike
+        # link; the fallback below constructs a URL from trusted parts.
+        # shellcheck source=scripts/url-trust.sh
+        . "$ACTION_PATH/scripts/url-trust.sh"
+        EXPECTED_ORIGIN=$(url_origin "${SONAR_HOST_URL:-https://sonarcloud.io}")
+        # This step runs with if: always() and must not fail the job; on
+        # a scheme-less (invalid) sonar_host_url, anchor trust to the
+        # SonarCloud default instead (file-derived URLs are then ignored
+        # unless they match it, and the fallback URL construction below
+        # still produces a usable dashboard link).
+        if [ -z "$EXPECTED_ORIGIN" ]; then
+          echo "⚠️ sonar_host_url has no usable scheme/host; anchoring URL trust to https://sonarcloud.io"
+          EXPECTED_ORIGIN='https://sonarcloud.io'
+        fi
+        check_url() {
+          # Echo the URL when trusted; echo nothing otherwise. Return 0
+          # explicitly on every path: a bare 'return' propagates the
+          # previous command's status, which would make the function
+          # brittle under 'set -e'.
+          case "$1" in
+            '') return 0 ;;
+          esac
+          if [ -z "$EXPECTED_ORIGIN" ] || \
+             [ "$(url_origin "$1")" != "$EXPECTED_ORIGIN" ]; then
+            echo "⚠️ Ignoring $2 from report task file (origin does not match sonar_host_url)" >&2
+            return 0
+          fi
+          printf '%s' "$1"
+        }
+        DASHBOARD_URL=$(check_url "$DASHBOARD_URL" 'dashboardUrl')
+        SERVER_URL=$(check_url "$SERVER_URL" 'serverUrl')
 
         # Fallback to constructing URL if not found in report-task.txt.
         # Derive the base host from serverUrl= in report-task.txt (preferred),
