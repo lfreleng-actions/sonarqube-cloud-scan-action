@@ -205,7 +205,7 @@ For information on the build wrapper for C language based projects:
 | lc_all                | False    | en_US.UTF-8                         | Locale for code base (if not covered by en_US.UTF-8)                                                                                   |
 | debug                 | False    | false                               | Enable debugging output                                                                                                                |
 | project_base_dir      | False    | .                                   | Set the sonar.projectBaseDir analysis property                                                                                         |
-| scanner_version       | False    | (uses SonarSource action's default) | Version of the Sonar Scanner CLI to use                                                                                                |
+| scanner_version       | False    | 8.1.0.6389                          | Version of the Sonar Scanner CLI to use                                                                                                |
 | skip_jre_provisioning | False    | false                               | Skip JRE auto-provisioning by the Sonar Scanner CLI (see note below)                                                                   |
 | args                  | False    | -Dsonar.scanner.cache.enabled=false | Arguments to pass to the Sonar Scanner CLI                                                                                             |
 | sonar_organization    | False    | ''                                  | Override the SonarQube organization (sonar.organization)                                                                               |
