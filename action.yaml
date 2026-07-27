@@ -69,6 +69,30 @@ inputs:
     description: 'Version of the Sonar Scanner CLI to use'
     required: false
     default: '8.1.0.6389'
+  scanner_binaries_url:
+    # Useful for air-gapped/self-hosted environments with a local
+    # mirror of the Sonar Scanner CLI binaries
+    description: 'URL to download the Sonar Scanner CLI binaries from'
+    required: false
+    default: 'https://binaries.sonarsource.com/Distribution/sonar-scanner-cli'
+  scanner_binaries_auth_header:
+    # e.g. 'Bearer mytoken' or 'Basic base64creds' for private mirrors;
+    # pass the value from a secret (e.g. secrets.MIRROR_AUTH_HEADER)
+    # rather than embedding credentials in workflow YAML
+    description: 'Authorization header for the scanner binaries download'
+    required: false
+    default: ''
+  skip_signature_verification:
+    # Private mirrors may not publish detached signatures; only skip
+    # verification when the download source is trusted
+    description: 'Skip GPG signature verification of the scanner binaries'
+    required: false
+    default: 'false'
+  scanner_java_opts:
+    # e.g. '-Xmx4g' for large codebases; appended to SONAR_SCANNER_OPTS
+    description: 'Extra JVM options for the Sonar Scanner CLI'
+    required: false
+    default: ''
   skip_jre_provisioning:
     # SonarSource is deprecating the bundled Java 17 runtime; support
     # ends July 2026. Letting the scanner provision its own JRE keeps
@@ -78,7 +102,12 @@ inputs:
     required: false
     default: 'false'
   args:
-    description: 'Arguments to pass to the Sonar Scanner CLI (e.g., "-Dsonar.verbose=true")'
+    # Reaches whichever backend analysis_mode selects, as both accept the
+    # same -Dsonar.* properties. Split on whitespace when passed on, so
+    # an individual argument cannot itself contain spaces (quoting is not
+    # preserved). The default tunes the Scanner CLI's cache;
+    # sonar-maven-plugin has no equivalent setting and ignores it.
+    description: 'Arguments passed to the analysis backend (e.g., "-Dsonar.verbose=true")'
     required: false
     default: '-Dsonar.scanner.cache.enabled=false'
   sonar_organization:
@@ -97,15 +126,62 @@ inputs:
     description: 'Analysis target branch (sonar.branch.target); useful for Gerrit decoration'
     required: false
     default: ''
+  sonar_gerrit_project:
+    # Sets sonar.analysis.gerritProjectName, which SonarQube surfaces as
+    # analysis metadata so a scan can be traced back to its Gerrit
+    # project. Applies to both analysis modes.
+    description: 'Gerrit project name recorded on the analysis (sonar.analysis.gerritProjectName)'
+    required: false
+    default: ''
   wait_for_quality_gate:
     description: 'Poll the SonarQube quality gate after the analysis task completes'
     required: false
     default: 'false'
+  quality_gate_timeout:
+    # The deadline check runs between polls, so an in-flight API
+    # request (bounded by a 60s curl --max-time) can extend the step
+    # slightly beyond the configured limit
+    # yamllint disable-line rule:line-length
+    description: 'Wall-clock limit in seconds for quality gate polling (polled every 5 seconds; an in-flight API request may extend the step by up to 60 seconds)'
+    required: false
+    default: '150'
   fail_on_quality_gate:
     # yamllint disable-line rule:line-length
     description: 'Fail the action when the quality gate status is not OK. Requires wait_for_quality_gate: true, and takes effect only when the gate can actually be evaluated (skipped without failing when jq, the report task file, ceTaskUrl, serverUrl, or a valid sonar_token are missing)'
     required: false
     default: 'false'
+  analysis_mode:
+    # 'cli' runs the SonarSource Scanner CLI and suits any language.
+    # 'maven' runs sonar-maven-plugin against an already-built reactor so
+    # the plugin derives module structure, compiled binaries and coverage
+    # report paths from the Maven project model -- what a multi-module
+    # Java project needs, and impractical to reproduce by hand through
+    # scanner properties. Maven mode expects the build (including tests
+    # and coverage) to have already run in this workspace; pair it with
+    # no_checkout: true when an earlier step performed the build.
+    # The scanner_*, scanner_java_opts, skip_jre_provisioning and
+    # sonar_root_cert inputs configure the Scanner CLI only and are
+    # ignored in Maven mode; Maven reads a private CA from the JVM
+    # truststore instead (set it via MAVEN_OPTS).
+    description: "Analysis backend: 'cli' (Sonar Scanner CLI) or 'maven' (sonar-maven-plugin)"
+    required: false
+    default: 'cli'
+  maven_sonar_plugin_version:
+    # Pinned to a current release rather than tracking LATEST, so an
+    # upstream publish cannot silently change analysis behaviour.
+    # Override to pin an older plugin (e.g. '3.9.1.2184') when a project
+    # needs it. Requires Java 11 or newer.
+    description: 'Version of org.sonarsource.scanner.maven:sonar-maven-plugin (maven mode)'
+    required: false
+    default: '5.7.0.6970'
+  maven_args:
+    # Free-form, caller-controlled, same trust model as the 'args' input;
+    # e.g. '--settings /path/settings.xml' or '-Dmaven.repo.local=/tmp/r'.
+    # Split on whitespace, so an individual argument cannot itself
+    # contain spaces (quoting is not preserved).
+    description: 'Extra arguments appended to the Maven sonar invocation (maven mode)'
+    required: false
+    default: ''
 
 outputs:
   sonar_org:
@@ -365,10 +441,28 @@ runs:
         PROJECT_KEY_OVERRIDE: ${{ inputs.sonar_project_key }}
         BRANCH_NAME: ${{ inputs.sonar_branch_name }}
         BRANCH_TARGET: ${{ inputs.sonar_branch_target }}
+        GERRIT_PROJECT: ${{ inputs.sonar_gerrit_project }}
         SKIP_JRE: ${{ inputs.skip_jre_provisioning }}
+        ANALYSIS_MODE: ${{ inputs.analysis_mode }}
+        # Effective identifiers the config step resolved from
+        # sonar-project.properties / .sonarcloud.properties (or the
+        # ephemeral config it generates), with the override inputs
+        # already applied.
+        RESOLVED_ORG: ${{ steps.sonar-config.outputs.sonar_org }}
+        RESOLVED_KEY: ${{ steps.sonar-config.outputs.project_key }}
       run: |
-        # Assemble the Sonar Scanner CLI arguments
+        # Assemble the Sonar scanner arguments
         set -euo pipefail
+        # Both analysis modes accept the same -Dsonar.* properties, so the
+        # argument string is built once and consumed by whichever backend
+        # the analysis_mode input selects.
+        case "$ANALYSIS_MODE" in
+          cli | maven) ;;
+          *)
+            echo "❌ analysis_mode must be 'cli' or 'maven'" >&2
+            exit 1
+            ;;
+        esac
         ARGS="$BASE_ARGS"
         # The override/branch inputs are documented as simple identity and
         # branch fields and are interpolated into single -Dkey=value tokens.
@@ -387,28 +481,55 @@ runs:
         validate_token 'sonar_project_key' "$PROJECT_KEY_OVERRIDE"
         validate_token 'sonar_branch_name' "$BRANCH_NAME"
         validate_token 'sonar_branch_target' "$BRANCH_TARGET"
+        validate_token 'sonar_gerrit_project' "$GERRIT_PROJECT"
         # skip_jre_provisioning is interpolated into SONAR_SCANNER_OPTS by
-        # the scan step; constrain it to a strict boolean so a crafted
+        # the CLI scan step; constrain it to a strict boolean so a crafted
         # value cannot smuggle extra JVM/scanner options (free-form flags
         # belong in the 'args' input, which callers already control).
-        case "$SKIP_JRE" in
-          true | false) ;;
-          *)
-            echo "❌ skip_jre_provisioning must be 'true' or 'false'" >&2
-            exit 1
-            ;;
-        esac
-        if [ -n "$SONAR_ORG_OVERRIDE" ]; then
-          ARGS="$ARGS -Dsonar.organization=$SONAR_ORG_OVERRIDE"
+        # Maven mode never reads the value and documents it as ignored, so
+        # validating it there would reject configurations the run does not
+        # actually use.
+        if [ "$ANALYSIS_MODE" != 'maven' ]; then
+          case "$SKIP_JRE" in
+            true | false) ;;
+            *)
+              echo "❌ skip_jre_provisioning must be 'true' or 'false'" >&2
+              exit 1
+              ;;
+          esac
         fi
-        if [ -n "$PROJECT_KEY_OVERRIDE" ]; then
-          ARGS="$ARGS -Dsonar.projectKey=$PROJECT_KEY_OVERRIDE"
+        # The Scanner CLI reads sonar-project.properties itself, so only an
+        # explicit override needs passing through. sonar-maven-plugin reads
+        # the Maven project model instead and never consults that file, so
+        # without these it would derive the project key from the POM
+        # coordinates and analyse a different project (or fail). Maven mode
+        # therefore passes the identifiers the config step resolved, which
+        # already fold in any override input.
+        if [ "$ANALYSIS_MODE" = 'maven' ]; then
+          ORG_VALUE="$RESOLVED_ORG"
+          KEY_VALUE="$RESOLVED_KEY"
+          # Resolved values can originate from a repository config file, so
+          # apply the same single-token check used for the inputs.
+          validate_token 'sonar.organization' "$ORG_VALUE"
+          validate_token 'sonar.projectKey' "$KEY_VALUE"
+        else
+          ORG_VALUE="$SONAR_ORG_OVERRIDE"
+          KEY_VALUE="$PROJECT_KEY_OVERRIDE"
+        fi
+        if [ -n "$ORG_VALUE" ]; then
+          ARGS="$ARGS -Dsonar.organization=$ORG_VALUE"
+        fi
+        if [ -n "$KEY_VALUE" ]; then
+          ARGS="$ARGS -Dsonar.projectKey=$KEY_VALUE"
         fi
         if [ -n "$BRANCH_NAME" ]; then
           ARGS="$ARGS -Dsonar.branch.name=$BRANCH_NAME"
         fi
         if [ -n "$BRANCH_TARGET" ]; then
           ARGS="$ARGS -Dsonar.branch.target=$BRANCH_TARGET"
+        fi
+        if [ -n "$GERRIT_PROJECT" ]; then
+          ARGS="$ARGS -Dsonar.analysis.gerritProjectName=$GERRIT_PROJECT"
         fi
         # Use the multiline (delimiter) output form so a newline in any
         # input value cannot break the output file or inject extra outputs.
@@ -421,7 +542,7 @@ runs:
 
     - name: 'SonarQube Scan'
       id: sonar-scan
-
+      if: inputs.analysis_mode != 'maven'
       uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
       env:
         SONAR_TOKEN: ${{ inputs.sonar_token }}
@@ -429,21 +550,90 @@ runs:
         SONAR_ROOT_CERT: ${{ inputs.sonar_root_cert }}
         SONAR_VERBOSE: ${{ inputs.debug }}
         LC_ALL: ${{ inputs.lc_all }}
-        SONAR_SCANNER_OPTS: "-Dsonar.scanner.skipJreProvisioning=${{ inputs.skip_jre_provisioning }}"
+        # yamllint disable-line rule:line-length
+        SONAR_SCANNER_OPTS: "-Dsonar.scanner.skipJreProvisioning=${{ inputs.skip_jre_provisioning }} ${{ inputs.scanner_java_opts }}"
       with:
         projectBaseDir: ${{ inputs.project_base_dir }}
         # Fallback guards against callers passing an explicit empty string
         scannerVersion: ${{ inputs.scanner_version || '8.1.0.6389' }}
+        scannerBinariesUrl: ${{ inputs.scanner_binaries_url }}
+        scannerBinariesAuthHeader: ${{ inputs.scanner_binaries_auth_header }}
+        skipSignatureVerification: ${{ inputs.skip_signature_verification }}
         args: ${{ steps.scan-args.outputs.args }}
+
+    - name: 'SonarQube Scan (Maven)'
+      id: sonar-scan-maven
+      if: inputs.analysis_mode == 'maven'
+      shell: bash
+      working-directory: ${{ inputs.project_base_dir }}
+      env:
+        # sonar-maven-plugin reads the credential from SONAR_TOKEN, so it
+        # never reaches the command line (and therefore never the process
+        # table or a build log echo).
+        SONAR_TOKEN: ${{ inputs.sonar_token }}
+        SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
+        PLUGIN_VERSION: ${{ inputs.maven_sonar_plugin_version }}
+        SCAN_ARGS: ${{ steps.scan-args.outputs.args }}
+        EXTRA_MAVEN_ARGS: ${{ inputs.maven_args }}
+        DEBUG: ${{ inputs.debug }}
+        LC_ALL: ${{ inputs.lc_all }}
+      run: |
+        # Analyse an already-built Maven reactor with sonar-maven-plugin
+        set -euo pipefail
+        # The version is interpolated into the fully-qualified goal
+        # coordinate (groupId:artifactId:version:goal), so restrict it to
+        # the characters a Maven version may legitimately contain. An
+        # allow-list rather than a deny-list: a value carrying a colon
+        # (e.g. '5.7.0.6970:help') would shift the coordinate segments
+        # and could invoke an unintended goal, and whitespace could
+        # append further goals or flags.
+        case "$PLUGIN_VERSION" in
+          '')
+            echo "❌ maven_sonar_plugin_version must not be empty" >&2
+            exit 1
+            ;;
+          *[!A-Za-z0-9._+-]*)
+            # yamllint disable-line rule:line-length
+            echo "❌ maven_sonar_plugin_version must contain only letters, digits, dot, underscore, plus or hyphen; received: '$PLUGIN_VERSION'" >&2
+            exit 1
+            ;;
+        esac
+        if ! command -v mvn > /dev/null 2>&1; then
+          # Maven mode analyses an existing build rather than creating
+          # one, so the toolchain is the caller's responsibility.
+          echo "❌ mvn not found on PATH; analysis_mode 'maven' requires Maven to be provisioned and the project already built" >&2
+          exit 1
+        fi
+        GOAL="org.sonarsource.scanner.maven:sonar-maven-plugin:${PLUGIN_VERSION}:sonar"
+        VERBOSE=''
+        if [ "$DEBUG" = 'true' ]; then
+          VERBOSE='-Dsonar.verbose=true'
+        fi
+        echo "Running Maven goal: ${GOAL}"
+        # Word splitting is intentional for the assembled argument
+        # strings; both are caller-controlled scanner/Maven flags.
+        # shellcheck disable=SC2086
+        mvn --batch-mode --no-transfer-progress "$GOAL" \
+          -Dsonar.host.url="$SONAR_HOST_URL" \
+          $VERBOSE $SCAN_ARGS $EXTRA_MAVEN_ARGS
 
     - name: 'Parse scan output'
       id: parse-output
       shell: bash
       env:
         PROJECT_BASE_DIR: ${{ inputs.project_base_dir }}
+        ANALYSIS_MODE: ${{ inputs.analysis_mode }}
       run: |
         # Parse scan output
-        REPORT_TASK_FILE="$PROJECT_BASE_DIR/.scannerwork/report-task.txt"
+        # The Scanner CLI writes .scannerwork/report-task.txt, while
+        # sonar-maven-plugin writes it under the root project's build
+        # directory. Resolve the right one so the quality-gate and
+        # summary steps stay backend-agnostic.
+        if [ "$ANALYSIS_MODE" = 'maven' ]; then
+          REPORT_TASK_FILE="$PROJECT_BASE_DIR/target/sonar/report-task.txt"
+        else
+          REPORT_TASK_FILE="$PROJECT_BASE_DIR/.scannerwork/report-task.txt"
+        fi
 
         if [ -f "$REPORT_TASK_FILE" ]; then
           echo "Scanner report task file found 📁"
@@ -479,11 +669,27 @@ runs:
         REPORT_TASK_FILE_PATH: ${{ steps.parse-output.outputs.report_task_file }}
         FAIL_ON_QG: ${{ inputs.fail_on_quality_gate }}
         ACTION_PATH: ${{ github.action_path }}
+        QG_TIMEOUT: ${{ inputs.quality_gate_timeout }}
       run: |
         # Poll the compute-engine task, then read the quality gate status
         set -euo pipefail
         REPORT_TASK_FILE="$REPORT_TASK_FILE_PATH"
         QG_STATUS="UNKNOWN"
+
+        # Validate the polling timeout up front; an invalid value is a
+        # caller configuration error rather than a missing prerequisite,
+        # so fail loudly instead of skipping the gate.
+        if ! [[ "$QG_TIMEOUT" =~ ^[0-9]+$ ]] || \
+           [ "$QG_TIMEOUT" -lt 5 ] || [ "$QG_TIMEOUT" -gt 3600 ]; then
+          echo "❌ quality_gate_timeout must be an integer number of seconds (5-3600); received: '$QG_TIMEOUT'" >&2
+          exit 1
+        fi
+        # Force base 10. Bash arithmetic reads a leading-zero literal as
+        # octal, so '0300' would silently shorten the deadline to 192
+        # seconds and '0900' would abort the step, since it is not valid
+        # octal. The range check above uses test(1), which is already
+        # base 10, so both forms reach this point.
+        QG_TIMEOUT=$((10#$QG_TIMEOUT))
 
         if [ ! -f "$REPORT_TASK_FILE" ]; then
           echo '⚠️ Report task file not found; skipping quality gate'
@@ -564,9 +770,12 @@ runs:
         }
 
         ANALYSIS_ID=''
-        ATTEMPTS=0
-        MAX_ATTEMPTS=30
-        while [ "$ATTEMPTS" -lt "$MAX_ATTEMPTS" ]; do
+        # Enforce the timeout as a wall-clock deadline rather than an
+        # attempt count, so slow API responses (each request is bounded
+        # separately by the curl --max-time above) count against the
+        # configured limit instead of extending it.
+        DEADLINE=$(( $(date +%s) + QG_TIMEOUT ))
+        while true; do
           # Fall back to {} on curl failure so jq stays deterministic and
           # the loop keeps retrying instead of failing under pipefail.
           TASK_JSON=$(sonar_get "$CE_TASK_URL" || echo '{}')
@@ -579,12 +788,13 @@ runs:
             echo "❌ Background analysis task ended with status: $TASK_STATUS"
             break
           fi
-          ATTEMPTS=$((ATTEMPTS + 1))
-          # Sleep between polls, but not after the final attempt (no further
-          # poll follows, so the extra delay would be wasted).
-          if [ "$ATTEMPTS" -lt "$MAX_ATTEMPTS" ]; then
-            sleep 5
+          # Stop when no further poll can start (and complete a sleep)
+          # before the deadline passes.
+          if [ "$(date +%s)" -ge "$((DEADLINE - 5))" ]; then
+            echo "⚠️ Quality gate polling timed out after ${QG_TIMEOUT}s"
+            break
           fi
+          sleep 5
         done
 
         if [ -n "$ANALYSIS_ID" ]; then

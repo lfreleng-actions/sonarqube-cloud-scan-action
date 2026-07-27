@@ -8,8 +8,13 @@ name: 'Test GitHub Action 🧪'
 # yamllint disable-line rule:truthy
 on:
   workflow_dispatch:
-  # Testing this action on pull requests will fail
-  # Since required credentials are not available
+  # The scan jobs need SONAR_TOKEN. Pull requests raised from a fork
+  # never receive secrets, so those jobs gate on the event type and only
+  # the credential-free validation job runs for a pull request. To
+  # exercise the scan jobs before merge, push the branch to this
+  # repository and dispatch this workflow against it.
+  pull_request:
+    branches: ['main']
   push:
     branches: ['main']
 
@@ -20,9 +25,114 @@ concurrency:
 permissions: {}
 
 jobs:
+  ### Validate input handling without credentials ###
+  test-input-validation:
+    name: 'Test Input Validation'
+    runs-on: 'ubuntu-latest'
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - name: 'Checkout action'
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Input rejection happens in the argument-building step, before any
+      # network request and before the token is read, so these cases need
+      # no credentials and run on pull requests, where the scan jobs
+      # cannot. The placeholder token is never used.
+      - name: 'Reject an invalid analysis_mode'
+        id: bad-mode
+        continue-on-error: true
+        uses: ./
+        with:
+          sonar_token: 'placeholder-rejected-before-use'
+          no_checkout: 'true'
+          analysis_mode: 'not-a-real-mode'
+
+      - name: 'Reject a plugin version carrying extra arguments'
+        id: bad-version
+        continue-on-error: true
+        uses: ./
+        with:
+          sonar_token: 'placeholder-rejected-before-use'
+          no_checkout: 'true'
+          analysis_mode: 'maven'
+          maven_sonar_plugin_version: '5.7.0.6970 -Dsonar.host.url=evil'
+
+      - name: 'Reject a plugin version carrying a coordinate separator'
+        id: bad-version-colon
+        continue-on-error: true
+        uses: ./
+        with:
+          sonar_token: 'placeholder-rejected-before-use'
+          no_checkout: 'true'
+          analysis_mode: 'maven'
+          # A colon shifts the groupId:artifactId:version:goal segments
+          # and could invoke a goal other than 'sonar'
+          maven_sonar_plugin_version: '5.7.0.6970:help'
+
+      - name: 'Assert all malformed inputs were rejected'
+        env:
+          BAD_MODE_OUTCOME: ${{ steps.bad-mode.outcome }}
+          BAD_VERSION_OUTCOME: ${{ steps.bad-version.outcome }}
+          BAD_VERSION_COLON_OUTCOME: ${{ steps.bad-version-colon.outcome }}
+        run: |
+          # Both malformed inputs must fail the action, and must do so
+          # before either analysis backend starts
+          set -euo pipefail
+          RC=0
+          if [ "$BAD_MODE_OUTCOME" = 'failure' ]; then
+            echo '✅ invalid analysis_mode rejected'
+          else
+            echo "❌ invalid analysis_mode accepted (outcome: $BAD_MODE_OUTCOME)"
+            RC=1
+          fi
+          if [ "$BAD_VERSION_OUTCOME" = 'failure' ]; then
+            echo '✅ malformed maven_sonar_plugin_version rejected'
+          else
+            # A version carrying whitespace could append further Maven
+            # goals or flags to the plugin coordinate.
+            echo '❌ malformed maven_sonar_plugin_version accepted'
+            echo "   outcome: $BAD_VERSION_OUTCOME"
+            RC=1
+          fi
+          if [ "$BAD_VERSION_COLON_OUTCOME" = 'failure' ]; then
+            echo '✅ maven_sonar_plugin_version with a colon rejected'
+          else
+            # A colon shifts the coordinate segments, so the plugin could
+            # run a goal other than the intended 'sonar'.
+            echo '❌ maven_sonar_plugin_version with a colon accepted'
+            echo "   outcome: $BAD_VERSION_COLON_OUTCOME"
+            RC=1
+          fi
+          # A failed outcome on its own is weak evidence: should input
+          # validation regress, the action would carry on and fail later
+          # anyway (the placeholder token cannot authenticate), and the
+          # checks above would still read as a rejection. Each backend
+          # leaves a working directory behind once it starts, so their
+          # absence shows the run stopped at validation instead.
+          if [ -e .scannerwork ]; then
+            echo '❌ .scannerwork exists: the Scanner CLI backend started'
+            RC=1
+          else
+            echo '✅ Scanner CLI backend never started'
+          fi
+          if [ -e target/sonar ]; then
+            echo '❌ target/sonar exists: the Maven backend started'
+            RC=1
+          else
+            echo '✅ Maven backend never started'
+          fi
+          exit "$RC"
+
   ### Test the GitHub Action with test-python-project ###
   test-python-project:
     name: 'Test with Python Project'
+    # Requires SONAR_TOKEN; unavailable to pull requests from forks.
+    if: github.event_name != 'pull_request'
     runs-on: 'ubuntu-latest'
     # Run this job in a dedicated environment so its execution and any
     # environment-scoped secrets can be gated by environment protection
@@ -92,6 +202,8 @@ jobs:
   ### Test the GitHub Action with Java/Maven project ###
   test-java-maven:
     name: 'Test with Java Maven Project'
+    # Requires SONAR_TOKEN; unavailable to pull requests from forks.
+    if: github.event_name != 'pull_request'
     runs-on: 'ubuntu-latest'
     # Run this job in a dedicated environment so its execution and any
     # environment-scoped secrets can be gated by environment protection
@@ -188,3 +300,124 @@ jobs:
           no_checkout: 'true'
           debug: 'true'
           project_base_dir: 'rappmanager'
+
+  ### Test Maven-native analysis (analysis_mode: maven) ###
+  test-java-maven-native:
+    name: 'Test with Java Maven Project (Maven mode)'
+    # Requires SONAR_TOKEN; unavailable to pull requests from forks.
+    if: github.event_name != 'pull_request'
+    # Serialised behind the CLI job: both analyse the same SonarQube
+    # project, and concurrent analyses of one project race each other.
+    needs: test-java-maven
+    runs-on: 'ubuntu-latest'
+    # Run this job in a dedicated environment so its execution and any
+    # environment-scoped secrets can be gated by environment protection
+    # rules (satisfies zizmor's secrets-outside-env).
+    environment: 'development'
+    permissions:
+      contents: read
+      security-events: write  # Upload scan results to code scanning
+      id-token: write  # Enable optional OIDC auth to SonarQube Cloud
+    timeout-minutes: 20
+    steps:
+      - name: 'Checkout action'
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: 'Checkout rappmanager repository'
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: 'o-ran-sc/nonrtric-plt-rappmanager'
+          path: 'rappmanager'
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: 'Check for file: pom.xml'
+        id: maven-project
+        # yamllint disable-line rule:line-length
+        uses: lfreleng-actions/path-check-action@b51f09959a4a71eff2e2f175bf80400ae8576f63 # v0.2.1
+        with:
+          path: 'rappmanager/pom.xml'
+
+      - name: 'Setup Java'
+        if: steps.maven-project.outputs.type == 'file'
+        # yamllint disable-line rule:line-length
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: 'Setup Maven'
+        if: steps.maven-project.outputs.type == 'file'
+        # yamllint disable-line rule:line-length
+        uses: stCarolas/setup-maven@d6af6abeda15e98926a57b5aa970a96bb37f97d1 # v5
+        with:
+          maven-version: '3.9.9'
+
+      - name: 'Build Maven project'
+        if: steps.maven-project.outputs.type == 'file'
+        working-directory: 'rappmanager'
+        run: |
+          # Maven mode analyses an existing build rather than creating
+          # one, so the reactor must be built (with tests) beforehand.
+          mvn clean verify -Ddocker.skip=true
+
+      - name: 'Run SonarQube Cloud Scan (Maven mode)'
+        id: maven-scan
+        if: steps.maven-project.outputs.type == 'file'
+        uses: ./
+        with:
+          sonar_token: '${{ secrets.SONAR_TOKEN }}'
+          no_checkout: 'true'
+          debug: 'true'
+          project_base_dir: 'rappmanager'
+          analysis_mode: 'maven'
+          # Deliberately no sonar_organization / sonar_project_key here.
+          # sonar-maven-plugin never reads sonar-project.properties, so
+          # this checks the action forwards the identifiers it resolved
+          # from that file (o-ran-sc / nonrtric-plt-rappmanager) rather
+          # than letting the plugin derive a key from POM coordinates and
+          # analyse the wrong project.
+          sonar_gerrit_project: 'nonrtric-plt-rappmanager'
+          # Exercises gate evaluation against the Maven plugin's
+          # report-task.txt location, which differs from the CLI's.
+          # Generous timeout keeps a slow compute engine from making the
+          # assertion below flaky.
+          wait_for_quality_gate: 'true'
+          quality_gate_timeout: '300'
+          # A failing gate on an upstream project must not fail our test.
+          fail_on_quality_gate: 'false'
+
+      - name: 'Assert Maven mode produced gate and dashboard outputs'
+        if: steps.maven-project.outputs.type == 'file'
+        env:
+          GATE_STATUS: ${{ steps.maven-scan.outputs.quality_gate_status }}
+          DASHBOARD_URL: ${{ steps.maven-scan.outputs.dashboard_url }}
+        run: |
+          # A resolved gate status proves the quality-gate step located
+          # the report-task.txt that sonar-maven-plugin writes under the
+          # build directory; UNKNOWN means it could not be evaluated.
+          set -euo pipefail
+          echo "quality_gate_status: ${GATE_STATUS:-<empty>}"
+          echo "dashboard_url: ${DASHBOARD_URL:-<empty>}"
+          RC=0
+          case "${GATE_STATUS:-}" in
+            OK | ERROR | NONE)
+              echo '✅ quality gate evaluated from the Maven report task file'
+              ;;
+            *)
+              echo "❌ quality gate not evaluated"
+              echo "   status: ${GATE_STATUS:-<empty>}"
+              RC=1
+              ;;
+          esac
+          if [ -n "${DASHBOARD_URL:-}" ]; then
+            echo '✅ dashboard URL reported'
+          else
+            echo '❌ dashboard URL missing'
+            RC=1
+          fi
+          exit "$RC"

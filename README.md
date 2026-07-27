@@ -126,6 +126,11 @@ Without this setting, you'll need to either:
 
 ### Example: Java Maven Multi-Module Project
 
+> For Maven projects, consider `analysis_mode: 'maven'` instead — the
+> plugin derives the properties below from the reactor, so there
+> is nothing to hand-maintain. See
+> [Note: Maven analysis mode](#note-maven-analysis-mode).
+
 For a typical Maven multi-module Java project with this structure:
 
 ```text
@@ -194,26 +199,35 @@ For information on the build wrapper for C language based projects:
 
 <!-- markdownlint-disable MD013 -->
 
-| Variable Name         | Required | Default                             | Description                                                                                                                            |
-| --------------------- | -------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| sonar_token           | True     | N/A                                 | Mandatory authentication token to upload results                                                                                       |
-| sonar_root_cert       | False    | N/A                                 | PEM encoded server root certificate (for HTTPS upload)                                                                                 |
-| build_wrapper_url     | False    | N/A                                 | HTTPS download location of build wrapper/shell script                                                                                  |
-| build_wrapper_out_dir | False    | N/A                                 | Local filesystem location of build artefacts                                                                                           |
-| prescan_script_url    | False    | N/A                                 | HTTPS URL of a script run with bash after checkout, before scan, WITHOUT the build wrapper (mutually exclusive with build_wrapper_url) |
-| sonar_host_url        | False    | <https://sonarcloud.io>             | Uploads scans to the given host URL                                                                                                    |
-| lc_all                | False    | en_US.UTF-8                         | Locale for code base (if not covered by en_US.UTF-8)                                                                                   |
-| debug                 | False    | false                               | Enable debugging output                                                                                                                |
-| project_base_dir      | False    | .                                   | Set the sonar.projectBaseDir analysis property                                                                                         |
-| scanner_version       | False    | 8.1.0.6389                          | Version of the Sonar Scanner CLI to use                                                                                                |
-| skip_jre_provisioning | False    | false                               | Skip JRE auto-provisioning by the Sonar Scanner CLI (see note below)                                                                   |
-| args                  | False    | -Dsonar.scanner.cache.enabled=false | Arguments to pass to the Sonar Scanner CLI                                                                                             |
-| sonar_organization    | False    | ''                                  | Override the SonarQube organization (sonar.organization)                                                                               |
-| sonar_project_key     | False    | ''                                  | Override the SonarQube project key (sonar.projectKey)                                                                                  |
-| sonar_branch_name     | False    | ''                                  | Analysis branch name (sonar.branch.name); useful for Gerrit decoration                                                                 |
-| sonar_branch_target   | False    | ''                                  | Analysis target branch (sonar.branch.target); useful for Gerrit decoration                                                             |
-| wait_for_quality_gate | False    | false                               | Poll the SonarQube quality gate after the analysis task completes                                                                      |
-| fail_on_quality_gate  | False    | false                               | Fail the action when the quality gate status is not OK (requires wait_for_quality_gate: true)                                          |
+| Variable Name                | Required | Default                                                           | Description                                                                                                                            |
+| ---------------------------- | -------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| sonar_token                  | True     | N/A                                                               | Mandatory authentication token to upload results                                                                                       |
+| sonar_root_cert              | False    | N/A                                                               | PEM encoded server root certificate (for HTTPS upload)                                                                                 |
+| build_wrapper_url            | False    | N/A                                                               | HTTPS download location of build wrapper/shell script                                                                                  |
+| build_wrapper_out_dir        | False    | N/A                                                               | Local filesystem location of build artefacts                                                                                           |
+| prescan_script_url           | False    | N/A                                                               | HTTPS URL of a script run with bash after checkout, before scan, WITHOUT the build wrapper (mutually exclusive with build_wrapper_url) |
+| sonar_host_url               | False    | <https://sonarcloud.io>                                           | Uploads scans to the given host URL                                                                                                    |
+| lc_all                       | False    | en_US.UTF-8                                                       | Locale for code base (if not covered by en_US.UTF-8)                                                                                   |
+| debug                        | False    | false                                                             | Enable debugging output                                                                                                                |
+| project_base_dir             | False    | .                                                                 | Set the sonar.projectBaseDir analysis property                                                                                         |
+| scanner_version              | False    | 8.1.0.6389                                                        | Version of the Sonar Scanner CLI to use                                                                                                |
+| scanner_binaries_url         | False    | <https://binaries.sonarsource.com/Distribution/sonar-scanner-cli> | URL to download the Sonar Scanner CLI binaries from (air-gapped/self-hosted mirrors)                                                   |
+| scanner_binaries_auth_header | False    | ''                                                                | Authorization header for the scanner binaries download; pass via a secret (e.g. `${{ secrets.MIRROR_AUTH_HEADER }}`)                   |
+| skip_signature_verification  | False    | false                                                             | Skip GPG signature verification of the scanner binaries (requires a trusted mirror)                                                    |
+| scanner_java_opts            | False    | ''                                                                | Extra JVM options for the Sonar Scanner CLI (e.g. '-Xmx4g' for large codebases)                                                        |
+| skip_jre_provisioning        | False    | false                                                             | Skip JRE auto-provisioning by the Sonar Scanner CLI (see note below)                                                                   |
+| args                         | False    | -Dsonar.scanner.cache.enabled=false                               | Arguments passed to the analysis backend; both CLI and Maven modes receive these                                                       |
+| sonar_organization           | False    | ''                                                                | Override the SonarQube organization (sonar.organization)                                                                               |
+| sonar_project_key            | False    | ''                                                                | Override the SonarQube project key (sonar.projectKey)                                                                                  |
+| sonar_branch_name            | False    | ''                                                                | Analysis branch name (sonar.branch.name); useful for Gerrit decoration                                                                 |
+| sonar_branch_target          | False    | ''                                                                | Analysis target branch (sonar.branch.target); useful for Gerrit decoration                                                             |
+| sonar_gerrit_project         | False    | ''                                                                | Gerrit project name recorded on the analysis (sonar.analysis.gerritProjectName)                                                        |
+| wait_for_quality_gate        | False    | false                                                             | Poll the SonarQube quality gate after the analysis task completes                                                                      |
+| quality_gate_timeout         | False    | 150                                                               | Wall-clock limit in seconds for quality gate polling (an in-flight API request may extend the step by up to 60 seconds)                |
+| fail_on_quality_gate         | False    | false                                                             | Fail the action when the quality gate status is not OK (requires wait_for_quality_gate: true)                                          |
+| analysis_mode                | False    | cli                                                               | Analysis backend: 'cli' (Sonar Scanner CLI) or 'maven' (sonar-maven-plugin); see note below                                            |
+| maven_sonar_plugin_version   | False    | 5.7.0.6970                                                        | Version of org.sonarsource.scanner.maven:sonar-maven-plugin (maven mode; requires Java 11+)                                            |
+| maven_args                   | False    | ''                                                                | Extra arguments appended to the Maven sonar invocation (maven mode), e.g. '--settings /path/settings.xml'                              |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -268,6 +282,102 @@ that need to name the branch under analysis. Set `sonar_branch_name`
 whenever you set `sonar_branch_target`: SonarQube honours the target
 branch when the analysis names its branch, and otherwise treats the run
 as the main branch and ignores the target.
+
+The `sonar_gerrit_project` input maps to
+`sonar.analysis.gerritProjectName`, recording the originating Gerrit
+project as analysis metadata so you can trace a scan back to its source.
+
+### Note: Maven analysis mode
+
+By default the action runs the Sonar Scanner CLI, which suits any
+language. Setting `analysis_mode: 'maven'` instead runs
+`sonar-maven-plugin` against an **already-built** Maven reactor.
+
+Prefer Maven mode for multi-module Java projects. The plugin reads the
+Maven project model, so it derives module structure, compiled binaries,
+test binaries, source encoding and JaCoCo report paths automatically --
+replacing the hand-maintained `sonar.java.binaries`,
+`sonar.coverage.jacoco.xmlReportPaths` and per-module properties shown
+in [Example: Java Maven Multi-Module
+Project](#example-java-maven-multi-module-project), which drift out of
+step with the reactor as modules come and go.
+
+Maven mode analyses an existing build; it does not create one. The
+caller must provision Maven and run the build (including tests and
+coverage, since the quality gate measures coverage on new code)
+beforehand, in the same workspace. Pair it with
+`no_checkout: true` when an earlier step already checked out and built
+the project:
+
+```yaml
+- name: 'Build'
+  uses: lfreleng-actions/maven-build-action@<sha>  # vX.Y.Z
+  with:
+    java-version: '21'
+    mvn-phases: 'clean install'
+
+- name: 'SonarQube scan'
+  uses: lfreleng-actions/sonarqube-cloud-scan-action@<sha>  # vX.Y.Z
+  with:
+    sonar_token: ${{ secrets.SONAR_TOKEN }}
+    analysis_mode: 'maven'
+    no_checkout: true
+    wait_for_quality_gate: true
+    fail_on_quality_gate: true
+```
+
+Both modes accept the same `-Dsonar.*` properties, so
+`sonar_organization`, `sonar_project_key`, the branch-decoration inputs
+and `args` behave identically. The `scanner_*`, `scanner_java_opts`,
+`skip_jre_provisioning` and `sonar_root_cert` inputs configure the
+Scanner CLI and have no effect in Maven mode; use `maven_args` (for
+example `--settings /path/settings.xml`) and the standard `MAVEN_OPTS`
+environment variable instead. A self-hosted instance behind a private
+CA needs that certificate in the JVM truststore for Maven mode, for
+example:
+
+<!-- markdownlint-disable MD046 -->
+
+```yaml
+  env:
+    MAVEN_OPTS: >-
+      -Djavax.net.ssl.trustStore=/path/truststore.jks
+      -Djavax.net.ssl.trustStorePassword=${{ secrets.TRUSTSTORE_PASSWORD }}
+```
+
+<!-- markdownlint-enable MD046 -->
+
+Project identity carries across too. The Scanner CLI reads
+`sonar-project.properties` directly, whereas `sonar-maven-plugin` reads
+the Maven project model alone and would otherwise derive a project key
+from the POM coordinates. Maven mode thus forwards the
+`sonar.organization` and `sonar.projectKey` values the action resolved
+from that file (or from the config it generates when none exists), so
+both backends analyse the same project without extra configuration.
+
+This action pins the plugin version to a current release rather than
+tracking `LATEST`, so an upstream publish cannot change analysis
+behaviour unnoticed. Override `maven_sonar_plugin_version` to pin a
+different release -- for example `3.9.1.2184` for parity with an older
+pipeline. The default requires Java 11 or newer.
+
+The action passes the credential through the `SONAR_TOKEN` environment
+variable, which the plugin reads natively, so it never appears on the
+Maven command line.
+
+### Note: argument inputs are whitespace-separated
+
+The `args` and `maven_args` inputs split on whitespace when the action
+hands them to the backend, so a single argument cannot itself contain
+spaces: quoting inside the input value does not survive. A value such as
+`-Dsonar.projectName="My Project"` or
+`--settings "/path with spaces/settings.xml"` reaches the tool as two
+separate arguments.
+
+Prefer forms without embedded spaces, and pass identity fields through
+the dedicated inputs (`sonar_project_key`, `sonar_organization`,
+`sonar_branch_name`, `sonar_branch_target`, `sonar_gerrit_project`),
+which the action validates and assembles for you.
 
 ### Note: JRE auto-provisioning
 
