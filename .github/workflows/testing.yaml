@@ -33,12 +33,6 @@ jobs:
       contents: read
     timeout-minutes: 10
     steps:
-      - name: 'Checkout action'
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       # Input rejection happens in the argument-building step, before any
       # network request and before the token is read, so these cases need
       # no credentials and run on pull requests, where the scan jobs
@@ -46,7 +40,7 @@ jobs:
       - name: 'Reject an invalid analysis_mode'
         id: bad-mode
         continue-on-error: true
-        uses: ./
+        uses: $/
         with:
           sonar_token: 'placeholder-rejected-before-use'
           no_checkout: 'true'
@@ -55,7 +49,7 @@ jobs:
       - name: 'Reject a plugin version carrying extra arguments'
         id: bad-version
         continue-on-error: true
-        uses: ./
+        uses: $/
         with:
           sonar_token: 'placeholder-rejected-before-use'
           no_checkout: 'true'
@@ -65,7 +59,7 @@ jobs:
       - name: 'Reject a plugin version carrying a coordinate separator'
         id: bad-version-colon
         continue-on-error: true
-        uses: ./
+        uses: $/
         with:
           sonar_token: 'placeholder-rejected-before-use'
           no_checkout: 'true'
@@ -77,7 +71,7 @@ jobs:
       - name: 'Reject coverage report paths carrying whitespace'
         id: bad-coverage-paths
         continue-on-error: true
-        uses: ./
+        uses: $/
         with:
           sonar_token: 'placeholder-rejected-before-use'
           no_checkout: 'true'
@@ -205,12 +199,6 @@ jobs:
       id-token: write  # Enable optional OIDC auth to SonarQube Cloud
     timeout-minutes: 15
     steps:
-      - name: 'Checkout action'
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       - name: 'Checkout test-python-project'
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -253,7 +241,7 @@ jobs:
           fi
 
       - name: 'Run SonarQube Cloud Scan on test project'
-        uses: ./
+        uses: $/
         with:
           sonar_token: '${{ secrets.SONAR_TOKEN }}'
           no_checkout: 'true'
@@ -276,12 +264,6 @@ jobs:
       id-token: write  # Enable optional OIDC auth to SonarQube Cloud
     timeout-minutes: 20
     steps:
-      - name: 'Checkout action'
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       - name: 'Checkout rappmanager repository'
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -355,7 +337,7 @@ jobs:
 
       - name: 'Run SonarQube Cloud Scan on Maven project'
         if: steps.maven-project.outputs.type == 'file'
-        uses: ./
+        uses: $/
         with:
           sonar_token: '${{ secrets.SONAR_TOKEN }}'
           no_checkout: 'true'
@@ -381,12 +363,6 @@ jobs:
       id-token: write  # Enable optional OIDC auth to SonarQube Cloud
     timeout-minutes: 20
     steps:
-      - name: 'Checkout action'
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       - name: 'Checkout rappmanager repository'
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -429,7 +405,7 @@ jobs:
       - name: 'Run SonarQube Cloud Scan (Maven mode)'
         id: maven-scan
         if: steps.maven-project.outputs.type == 'file'
-        uses: ./
+        uses: $/
         with:
           sonar_token: '${{ secrets.SONAR_TOKEN }}'
           no_checkout: 'true'
