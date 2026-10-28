@@ -68,7 +68,7 @@ inputs:
   scanner_version:
     description: 'Version of the Sonar Scanner CLI to use'
     required: false
-    default: '8.1.0.6389'
+    default: '8.3.0.16463'
   scanner_binaries_url:
     # Useful for air-gapped/self-hosted environments with a local
     # mirror of the Sonar Scanner CLI binaries
@@ -188,7 +188,7 @@ inputs:
     # needs it. Requires Java 11 or newer.
     description: 'Version of org.sonarsource.scanner.maven:sonar-maven-plugin (maven mode)'
     required: false
-    default: '5.7.0.6970'
+    default: '5.8.0.7211'
   maven_args:
     # Free-form, caller-controlled, same trust model as the 'args' input;
     # e.g. '--settings /path/settings.xml' or '-Dmaven.repo.local=/tmp/r'.
@@ -411,7 +411,7 @@ runs:
     - name: 'Install build wrapper'
       if: inputs.build_wrapper_url != ''
 
-      uses: SonarSource/sonarqube-scan-action/install-build-wrapper@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+      uses: SonarSource/sonarqube-scan-action/install-build-wrapper@4d1dc0c91ee400dcf8a6dddf2f705ac36542e304 # v8.4.0
 
     - name: 'Run build wrapper'
       if: inputs.build_wrapper_url != ''
@@ -764,7 +764,7 @@ runs:
     - name: 'SonarQube Scan'
       id: sonar-scan
       if: inputs.analysis_mode != 'maven'
-      uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+      uses: SonarSource/sonarqube-scan-action@4d1dc0c91ee400dcf8a6dddf2f705ac36542e304 # v8.4.0
       env:
         SONAR_TOKEN: ${{ inputs.sonar_token }}
         SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
@@ -776,7 +776,7 @@ runs:
       with:
         projectBaseDir: ${{ inputs.project_base_dir }}
         # Fallback guards against callers passing an explicit empty string
-        scannerVersion: ${{ inputs.scanner_version || '8.1.0.6389' }}
+        scannerVersion: ${{ inputs.scanner_version || '8.3.0.16463' }}
         scannerBinariesUrl: ${{ inputs.scanner_binaries_url }}
         scannerBinariesAuthHeader: ${{ inputs.scanner_binaries_auth_header }}
         skipSignatureVerification: ${{ inputs.skip_signature_verification }}
@@ -805,7 +805,7 @@ runs:
         # coordinate (groupId:artifactId:version:goal), so restrict it to
         # the characters a Maven version may legitimately contain. An
         # allow-list rather than a deny-list: a value carrying a colon
-        # (e.g. '5.7.0.6970:help') would shift the coordinate segments
+        # (e.g. '5.8.0.7211:help') would shift the coordinate segments
         # and could invoke an unintended goal, and whitespace could
         # append further goals or flags.
         case "$PLUGIN_VERSION" in
