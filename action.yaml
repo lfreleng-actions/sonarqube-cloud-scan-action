@@ -263,7 +263,7 @@ runs:
 
     - name: 'Repository metadata'
       id: repository-metadata
-      uses: lfreleng-actions/repository-metadata-action@b2078d32ca207a0e110b2157a95271a35688c8e7 # v0.3.2
+      uses: lfreleng-actions/repository-metadata-action@2206d754f65f1a90f57b49be546712c5f594def2 # v0.3.3
       with:
         github_token: ${{ inputs.github_token }}
 
