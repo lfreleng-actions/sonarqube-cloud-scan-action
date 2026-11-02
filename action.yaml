@@ -392,7 +392,7 @@ runs:
     - name: 'Download remote build script'
       if: inputs.build_wrapper_url != ''
 
-      uses: lfreleng-actions/url-download-action@45fb5afff7ff3946393a1117d1c5099792453940 # v0.1.6
+      uses: lfreleng-actions/url-download-action@f3c55564c77694421403cff3c8f17ebf6e586bcf  # v0.1.7
       with:
         url: ${{ inputs.build_wrapper_url }}
 
@@ -433,7 +433,7 @@ runs:
     - name: 'Download remote pre-scan script'
       if: inputs.prescan_script_url != ''
 
-      uses: lfreleng-actions/url-download-action@45fb5afff7ff3946393a1117d1c5099792453940 # v0.1.6
+      uses: lfreleng-actions/url-download-action@f3c55564c77694421403cff3c8f17ebf6e586bcf  # v0.1.7
       with:
         url: ${{ inputs.prescan_script_url }}
         # Save outside the workspace (into the runner temp dir) so the
